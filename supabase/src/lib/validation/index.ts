@@ -42,7 +42,7 @@ export * from "./chat";
 export function validateInput<S extends z.ZodTypeAny>(
   schema: S,
   data: unknown,
-): z.output<S> {
+): z.infer<S> {
   const result = schema.safeParse(data);
   if (!result.success) {
     const fields = result.error.issues.map((issue) => ({
@@ -51,7 +51,7 @@ export function validateInput<S extends z.ZodTypeAny>(
     }));
     throw new ValidationError("Input validation failed.", { fields });
   }
-  return result.data;
+  return result.data as z.infer<S>;
 }
 
 /**
@@ -70,10 +70,10 @@ export function validateInput<S extends z.ZodTypeAny>(
 export function safeValidate<S extends z.ZodTypeAny>(
   schema: S,
   data: unknown,
-): Result<z.output<S>, AppError> {
+): Result<z.infer<S>, AppError> {
   const result = schema.safeParse(data);
   if (result.success) {
-    return { ok: true, value: result.data };
+    return { ok: true, value: result.data as z.infer<S> };
   }
   const fields = result.error.issues.map((issue) => ({
     path: issue.path.join("."),
