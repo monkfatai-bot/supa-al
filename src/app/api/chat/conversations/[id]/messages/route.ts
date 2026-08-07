@@ -32,6 +32,7 @@ import { RATE_LIMIT_PRESETS } from "@/lib/rate-limit/presets";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { validateInput } from "@/lib/validation";
 import { sendMessageSchema } from "@/lib/validation/chat";
+import type { SendMessageInput, AiProvider } from "@/lib/validation/chat";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -84,6 +85,9 @@ export async function POST(
       ...body,
       conversationId,
     });
+    // Keep a typed reference so we can satisfy the compiler in downstream
+    // places where TS infers `unknown` from the untyped validateInput call.
+    const validatedInput = input as SendMessageInput;
 
     // Build the messages array from the conversation's recent history + the
     // new user message. We read the conversation's system prompt + last N
@@ -118,7 +122,7 @@ export async function POST(
     }
     // Coerce input.content to string to satisfy TypeScript when the inferred
     // type is `unknown` during build-time.
-    messages.push({ role: "user", content: String(input.content) });
+    messages.push({ role: "user", content: String(validatedInput.content) });
 
     // Run the streaming chat service, but buffer the full response so we can
     // return it as a single JSON payload (non-streaming fallback).
@@ -127,11 +131,11 @@ export async function POST(
       conversationId,
       userId: user.id,
       messages,
-      provider: input.provider,
-      model: input.model,
+      provider: validatedInput.provider as AiProvider | undefined,
+      model: validatedInput.model,
       systemPrompt: conversation.system_prompt ?? undefined,
-      temperature: input.temperature,
-      maxTokens: input.maxTokens,
+      temperature: validatedInput.temperature,
+      maxTokens: validatedInput.maxTokens,
     });
 
     let assistantContent = "";
