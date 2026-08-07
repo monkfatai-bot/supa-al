@@ -132,10 +132,10 @@ export async function POST(
       userId: user.id,
       messages,
       provider: validatedInput.provider as AiProvider | undefined,
-      model: validatedInput.model,
+      model: validatedInput.model as string | undefined,
       systemPrompt: conversation.system_prompt ?? undefined,
-      temperature: validatedInput.temperature,
-      maxTokens: validatedInput.maxTokens,
+      temperature: validatedInput.temperature as number | undefined,
+      maxTokens: validatedInput.maxTokens as number | undefined,
     });
 
     let assistantContent = "";
