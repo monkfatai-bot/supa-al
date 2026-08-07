@@ -1,0 +1,951 @@
+     1→"use client";
+     2→
+     3→/**
+     4→ * Supa AI — Phase 9C employee data hooks.
+     5→ *
+     6→ * TanStack Query wrappers for every `/api/employees/*` REST endpoint
+     7→ * the employee UI consumes. Each hook returns the standard TanStack
+     8→ * Query result; mutations invalidate the relevant query keys so the
+     9→ * UI stays in sync after a successful write.
+    10→ *
+    11→ * All requests use relative URLs + `credentials: "include"` so the
+    12→ * Supabase auth cookie travels with every call. Errors are normalized
+    13→ * into a `{ message, code?, status? }` shape via {@link unwrapError}.
+    14→ *
+    15→ * The hooks are deliberately thin — they own no UI state. The
+    16→ * cross-component UI state (active tab, selected employee, active
+    17→ * chat employee) lives in {@link useEmployeeStore} (Zustand).
+    18→ *
+    19→ * @module @/hooks/use-employees
+    20→ */
+    21→import {
+    22→  useMutation,
+    23→  useQuery,
+    24→  useQueryClient,
+    25→} from "@tanstack/react-query";
+    26→
+    27→import type { ApiResponse } from "@/types/api";
+    28→import type {
+    29→  CreateEmployeeInput,
+    30→  CreateVersionInput,
+    31→  EmployeeChatResult,
+    32→  EmployeeDashboardSummary,
+    33→  EmployeeDepartment,
+    34→  EmployeeMarketplaceEntry,
+    35→  EmployeeMessage,
+    36→  EmployeePerformance,
+    37→  EmployeeSkill,
+    38→  EmployeeTraining,
+    39→  EmployeeVersion,
+    40→  EmployeeWithRelations,
+    41→  MemoryType,
+    42→  PublishToMarketplaceInput,
+    43→} from "@/lib/employees/client";
+    44→import type {
+    45→  AddMemoryInput,
+    46→  AddSkillInput,
+    47→  AssignToWorkspaceInput,
+    48→  ListEmployeesQuery,
+    49→  ListMarketplaceQuery,
+    50→  ListMemoryQuery,
+    51→  PerformanceQuery,
+    52→  SendMessageInput,
+    53→  TrainFromDocumentInput,
+    54→  TrainFromUrlInput,
+    55→  UpdateEmployeeInput,
+    56→  UpdateMemoryInput,
+    57→  UpdateSkillInput,
+    58→} from "@/lib/validation/employees";
+    59→import type { SkillDefinition, SkillCategory } from "@/lib/employees/client";
+    60→
+    61→// ---------------------------------------------------------------------------
+    62→// Query keys
+    63→// ---------------------------------------------------------------------------
+    64→
+    65→/** Centralized query-key factory so invalidations stay consistent. */
+    66→export const employeeKeys = {
+    67→  all: ["employees"] as const,
+    68→  list: (opts?: ListEmployeesQuery) =>
+    69→    [
+    70→      "employees",
+    71→      "list",
+    72→      opts?.search ?? "",
+    73→      opts?.department ?? "",
+    74→      opts?.status ?? "",
+    75→      opts?.isTemplate ?? "",
+    76→      opts?.isPublic ?? "",
+    77→      opts?.limit ?? 30,
+    78→      opts?.offset ?? 0,
+    79→    ] as const,
+    80→  detail: (id: string | null) =>
+    81→    ["employees", "detail", id ?? null] as const,
+    82→  skills: (employeeId: string | null) =>
+    83→    ["employees", "skills", employeeId ?? null] as const,
+    84→  memory: (employeeId: string | null, opts?: ListMemoryQuery) =>
+    85→    [
+    86→      "employees",
+    87→      "memory",
+    88→      employeeId ?? null,
+    89→      opts?.type ?? null,
+    90→      opts?.limit ?? 50,
+    91→    ] as const,
+    92→  training: (employeeId: string | null) =>
+    93→    ["employees", "training", employeeId ?? null] as const,
+    94→  assignments: (employeeId: string | null) =>
+    95→    ["employees", "assignments", employeeId ?? null] as const,
+    96→  performance: (employeeId: string | null, opts?: PerformanceQuery) =>
+    97→    [
+    98→      "employees",
+    99→      "performance",
+   100→      employeeId ?? null,
+   101→      opts?.dateFrom ?? null,
+   102→      opts?.dateTo ?? null,
+   103→    ] as const,
+   104→  versions: (employeeId: string | null) =>
+   105→    ["employees", "versions", employeeId ?? null] as const,
+   106→  dashboard: ["employees", "dashboard"] as const,
+   107→  departments: ["employees", "departments"] as const,
+   108→  catalog: ["employees", "catalog"] as const,
+   109→  marketplace: (opts?: ListMarketplaceQuery) =>
+   110→    [
+   111→      "employees",
+   112→      "marketplace",
+   113→      opts?.category ?? "",
+   114→      opts?.search ?? "",
+   115→      opts?.featured ?? "",
+   116→      opts?.limit ?? 24,
+   117→      opts?.offset ?? 0,
+   118→    ] as const,
+   119→  marketplaceEntry: (id: string | null) =>
+   120→    ["employees", "marketplace", "detail", id ?? null] as const,
+   121→  messages: (opts?: { fromId?: string; toId?: string; limit?: number }) =>
+   122→    [
+   123→      "employees",
+   124→      "messages",
+   125→      opts?.fromId ?? null,
+   126→      opts?.toId ?? null,
+   127→      opts?.limit ?? 50,
+   128→    ] as const,
+   129→};
+   130→
+   131→// ---------------------------------------------------------------------------
+   132→// Fetch helpers
+   133→// ---------------------------------------------------------------------------
+   134→
+   135→/** Normalized error shape consumed by the UI. */
+   136→export interface EmployeeApiError {
+   137→  message: string;
+   138→  code?: string;
+   139→  status?: number;
+   140→}
+   141→
+   142→async function unwrapError(res: Response): Promise<EmployeeApiError> {
+   143→  let raw: unknown = null;
+   144→  try {
+   145→    raw = await res.json();
+   146→  } catch {
+   147→    return {
+   148→      message: `Request failed (${res.status}).`,
+   149→      status: res.status,
+   150→    };
+   151→  }
+   152→  const envelope = raw as ApiResponse<never>;
+   153→  if (envelope && envelope.success === false && envelope.error) {
+   154→    return {
+   155→      message: envelope.error.message,
+   156→      code: envelope.error.code,
+   157→      status: res.status,
+   158→    };
+   159→  }
+   160→  return { message: `Request failed (${res.status}).`, status: res.status };
+   161→}
+   162→
+   163→/**
+   164→ * Issue a JSON request and either return the typed `data` payload or
+   165→ * throw a normalized {@link EmployeeApiError}.
+   166→ */
+   167→async function apiRequest<T>(
+   168→  method: string,
+   169→  url: string,
+   170→  body?: unknown,
+   171→  signal?: AbortSignal,
+   172→): Promise<T> {
+   173→  const init: RequestInit = {
+   174→    method,
+   175→    credentials: "include",
+   176→    headers:
+   177→      body !== undefined ? { "Content-Type": "application/json" } : undefined,
+   178→    body: body !== undefined ? JSON.stringify(body) : undefined,
+   179→    signal,
+   180→  };
+   181→  const res = await fetch(url, init);
+   182→  if (!res.ok) {
+   183→    throw await unwrapError(res);
+   184→  }
+   185→  const json = (await res.json()) as ApiResponse<T>;
+   186→  if (!json.success) {
+   187→    throw {
+   188→      message: json.error?.message ?? "Unexpected response shape.",
+   189→      code: json.error?.code,
+   190→    } as EmployeeApiError;
+   191→  }
+   192→  return json.data;
+   193→}
+   194→
+   195→// ---------------------------------------------------------------------------
+   196→// Employee CRUD
+   197→// ---------------------------------------------------------------------------
+   198→
+   199→/** GET `/api/employees` — paginated list of the caller's employees. */
+   200→export function useEmployees(opts: ListEmployeesQuery = {}) {
+   201→  return useQuery({
+   202→    queryKey: employeeKeys.list(opts),
+   203→    queryFn: () => {
+   204→      const p = new URLSearchParams();
+   205→      if (opts.search) p.set("search", opts.search);
+   206→      if (opts.department) p.set("department", opts.department);
+   207→      if (opts.status) p.set("status", opts.status);
+   208→      if (opts.isTemplate !== undefined) p.set("isTemplate", String(opts.isTemplate));
+   209→      if (opts.isPublic !== undefined) p.set("isPublic", String(opts.isPublic));
+   210→      if (opts.limit) p.set("limit", String(opts.limit));
+   211→      if (opts.offset) p.set("offset", String(opts.offset));
+   212→      const qs = p.toString();
+   213→      return apiRequest<{ employees: EmployeeWithRelations[] }>(
+   214→        "GET",
+   215→        `/api/employees${qs ? `?${qs}` : ""}`,
+   216→      ).then((r) => r.employees);
+   217→    },
+   218→    placeholderData: (prev) => prev,
+   219→    staleTime: 5 * 1000,
+   220→  });
+   221→}
+   222→
+   223→/** GET `/api/employees/:id` — fetch a single employee + relations. */
+   224→export function useEmployee(id: string | null) {
+   225→  return useQuery({
+   226→    queryKey: employeeKeys.detail(id),
+   227→    queryFn: () =>
+   228→      apiRequest<{ employee: EmployeeWithRelations }>(
+   229→        "GET",
+   230→        `/api/employees/${id}`,
+   231→      ).then((r) => r.employee),
+   232→    enabled: !!id,
+   233→  });
+   234→}
+   235→
+   236→/** POST `/api/employees` — create a new employee. */
+   237→export function useCreateEmployee() {
+   238→  const qc = useQueryClient();
+   239→  return useMutation({
+   240→    mutationFn: (input: CreateEmployeeInput) =>
+   241→      apiRequest<{ employee: EmployeeWithRelations }>(
+   242→        "POST",
+   243→        "/api/employees",
+   244→        input,
+   245→      ).then((r) => r.employee),
+   246→    onSuccess: (employee) => {
+   247→      qc.setQueryData(employeeKeys.detail(employee.id), { employee });
+   248→      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+   249→      qc.invalidateQueries({ queryKey: employeeKeys.dashboard });
+   250→    },
+   251→  });
+   252→}
+   253→
+   254→/** PATCH `/api/employees/:id` — partial update. */
+   255→export function useUpdateEmployee() {
+   256→  const qc = useQueryClient();
+   257→  return useMutation({
+   258→    mutationFn: ({
+   259→      id,
+   260→      input,
+   261→    }: {
+   262→      id: string;
+   263→      input: UpdateEmployeeInput;
+   264→    }) =>
+   265→      apiRequest<{ employee: EmployeeWithRelations }>(
+   266→        "PATCH",
+   267→        `/api/employees/${id}`,
+   268→        input,
+   269→      ).then((r) => r.employee),
+   270→    onSuccess: (employee) => {
+   271→      qc.setQueryData(employeeKeys.detail(employee.id), { employee });
+   272→      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+   273→      qc.invalidateQueries({ queryKey: employeeKeys.dashboard });
+   274→    },
+   275→  });
+   276→}
+   277→
+   278→/** DELETE `/api/employees/:id` — hard-delete. */
+   279→export function useDeleteEmployee() {
+   280→  const qc = useQueryClient();
+   281→  return useMutation({
+   282→    mutationFn: (id: string) =>
+   283→      apiRequest<{ deleted: boolean }>(
+   284→        "DELETE",
+   285→        `/api/employees/${id}`,
+   286→      ).then((r) => r.deleted),
+   287→    onSuccess: (_data, id) => {
+   288→      qc.removeQueries({ queryKey: employeeKeys.detail(id) });
+   289→      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+   290→      qc.invalidateQueries({ queryKey: employeeKeys.dashboard });
+   291→    },
+   292→  });
+   293→}
+   294→
+   295→// ---------------------------------------------------------------------------
+   296→// Lifecycle actions
+   297→// ---------------------------------------------------------------------------
+   298→
+   299→/** POST `/api/employees/:id/clone`. */
+   300→export function useCloneEmployee() {
+   301→  const qc = useQueryClient();
+   302→  return useMutation({
+   303→    mutationFn: (id: string) =>
+   304→      apiRequest<{ employee: EmployeeWithRelations }>(
+   305→        "POST",
+   306→        `/api/employees/${id}/clone`,
+   307→      ).then((r) => r.employee),
+   308→    onSuccess: (employee) => {
+   309→      qc.setQueryData(employeeKeys.detail(employee.id), { employee });
+   310→      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+   311→      qc.invalidateQueries({ queryKey: employeeKeys.dashboard });
+   312→    },
+   313→  });
+   314→}
+   315→
+   316→/** POST `/api/employees/:id/pause`. */
+   317→export function usePauseEmployee() {
+   318→  const qc = useQueryClient();
+   319→  return useMutation({
+   320→    mutationFn: (id: string) =>
+   321→      apiRequest<{ employee: EmployeeWithRelations }>(
+   322→        "POST",
+   323→        `/api/employees/${id}/pause`,
+   324→      ).then((r) => r.employee),
+   325→    onSuccess: (employee) => {
+   326→      qc.setQueryData(employeeKeys.detail(employee.id), { employee });
+   327→      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+   328→      qc.invalidateQueries({ queryKey: employeeKeys.dashboard });
+   329→    },
+   330→  });
+   331→}
+   332→
+   333→/** POST `/api/employees/:id/resume`. */
+   334→export function useResumeEmployee() {
+   335→  const qc = useQueryClient();
+   336→  return useMutation({
+   337→    mutationFn: (id: string) =>
+   338→      apiRequest<{ employee: EmployeeWithRelations }>(
+   339→        "POST",
+   340→        `/api/employees/${id}/resume`,
+   341→      ).then((r) => r.employee),
+   342→    onSuccess: (employee) => {
+   343→      qc.setQueryData(employeeKeys.detail(employee.id), { employee });
+   344→      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+   345→      qc.invalidateQueries({ queryKey: employeeKeys.dashboard });
+   346→    },
+   347→  });
+   348→}
+   349→
+   350→/** POST `/api/employees/:id/archive`. */
+   351→export function useArchiveEmployee() {
+   352→  const qc = useQueryClient();
+   353→  return useMutation({
+   354→    mutationFn: (id: string) =>
+   355→      apiRequest<{ employee: EmployeeWithRelations }>(
+   356→        "POST",
+   357→        `/api/employees/${id}/archive`,
+   358→      ).then((r) => r.employee),
+   359→    onSuccess: (employee) => {
+   360→      qc.setQueryData(employeeKeys.detail(employee.id), { employee });
+   361→      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+   362→      qc.invalidateQueries({ queryKey: employeeKeys.dashboard });
+   363→    },
+   364→  });
+   365→}
+   366→
+   367→// ---------------------------------------------------------------------------
+   368→// Skills
+   369→// ---------------------------------------------------------------------------
+   370→
+   371→/** GET `/api/employees/:id/skills`. */
+   372→export function useEmployeeSkills(employeeId: string | null) {
+   373→  return useQuery({
+   374→    queryKey: employeeKeys.skills(employeeId),
+   375→    queryFn: () =>
+   376→      apiRequest<{ skills: EmployeeSkill[] }>(
+   377→        "GET",
+   378→        `/api/employees/${employeeId}/skills`,
+   379→      ).then((r) => r.skills),
+   380→    enabled: !!employeeId,
+   381→  });
+   382→}
+   383→
+   384→/** POST `/api/employees/:id/skills`. */
+   385→export function useAddSkill(employeeId: string) {
+   386→  const qc = useQueryClient();
+   387→  return useMutation({
+   388→    mutationFn: (input: AddSkillInput) =>
+   389→      apiRequest<{ skill: EmployeeSkill }>(
+   390→        "POST",
+   391→        `/api/employees/${employeeId}/skills`,
+   392→        input,
+   393→      ).then((r) => r.skill),
+   394→    onSuccess: () => {
+   395→      qc.invalidateQueries({ queryKey: employeeKeys.skills(employeeId) });
+   396→      qc.invalidateQueries({ queryKey: employeeKeys.detail(employeeId) });
+   397→    },
+   398→  });
+   399→}
+   400→
+   401→/** PATCH `/api/employees/:id/skills/:skillId`. */
+   402→export function useUpdateSkill(employeeId: string) {
+   403→  const qc = useQueryClient();
+   404→  return useMutation({
+   405→    mutationFn: ({
+   406→      skillId,
+   407→      input,
+   408→    }: {
+   409→      skillId: string;
+   410→      input: UpdateSkillInput;
+   411→    }) =>
+   412→      apiRequest<{ skill: EmployeeSkill }>(
+   413→        "PATCH",
+   414→        `/api/employees/${employeeId}/skills/${skillId}`,
+   415→        input,
+   416→      ).then((r) => r.skill),
+   417→    onSuccess: () => {
+   418→      qc.invalidateQueries({ queryKey: employeeKeys.skills(employeeId) });
+   419→      qc.invalidateQueries({ queryKey: employeeKeys.detail(employeeId) });
+   420→    },
+   421→  });
+   422→}
+   423→
+   424→/** DELETE `/api/employees/:id/skills/:skillId`. */
+   425→export function useRemoveSkill(employeeId: string) {
+   426→  const qc = useQueryClient();
+   427→  return useMutation({
+   428→    mutationFn: (skillId: string) =>
+   429→      apiRequest<{ deleted: boolean }>(
+   430→        "DELETE",
+   431→        `/api/employees/${employeeId}/skills/${skillId}`,
+   432→      ).then((r) => r.deleted),
+   433→    onSuccess: () => {
+   434→      qc.invalidateQueries({ queryKey: employeeKeys.skills(employeeId) });
+   435→      qc.invalidateQueries({ queryKey: employeeKeys.detail(employeeId) });
+   436→    },
+   437→  });
+   438→}
+   439→
+   440→// ---------------------------------------------------------------------------
+   441→// Memory
+   442→// ---------------------------------------------------------------------------
+   443→
+   444→/** GET `/api/employees/:id/memory`. */
+   445→export function useEmployeeMemory(
+   446→  employeeId: string | null,
+   447→  opts: ListMemoryQuery = {},
+   448→) {
+   449→  return useQuery({
+   450→    queryKey: employeeKeys.memory(employeeId, opts),
+   451→    queryFn: () => {
+   452→      const p = new URLSearchParams();
+   453→      if (opts.type) p.set("type", opts.type);
+   454→      if (opts.limit) p.set("limit", String(opts.limit));
+   455→      const qs = p.toString();
+   456→      return apiRequest<{ memory: import("@/lib/employees/client").EmployeeMemory[] }>(
+   457→        "GET",
+   458→        `/api/employees/${employeeId}/memory${qs ? `?${qs}` : ""}`,
+   459→      ).then((r) => r.memory);
+   460→    },
+   461→    enabled: !!employeeId,
+   462→  });
+   463→}
+   464→
+   465→/** POST `/api/employees/:id/memory`. */
+   466→export function useAddMemory(employeeId: string) {
+   467→  const qc = useQueryClient();
+   468→  return useMutation({
+   469→    mutationFn: (input: AddMemoryInput) =>
+   470→      apiRequest<{ memory: import("@/lib/employees/client").EmployeeMemory }>(
+   471→        "POST",
+   472→        `/api/employees/${employeeId}/memory`,
+   473→        input,
+   474→      ).then((r) => r.memory),
+   475→    onSuccess: () => {
+   476→      qc.invalidateQueries({ queryKey: employeeKeys.memory(employeeId) });
+   477→      qc.invalidateQueries({ queryKey: employeeKeys.detail(employeeId) });
+   478→    },
+   479→  });
+   480→}
+   481→
+   482→/** PATCH `/api/employees/:id/memory/:memoryId`. */
+   483→export function useUpdateMemory(employeeId: string) {
+   484→  const qc = useQueryClient();
+   485→  return useMutation({
+   486→    mutationFn: ({
+   487→      memoryId,
+   488→      input,
+   489→    }: {
+   490→      memoryId: string;
+   491→      input: UpdateMemoryInput;
+   492→    }) =>
+   493→      apiRequest<{ memory: import("@/lib/employees/client").EmployeeMemory }>(
+   494→        "PATCH",
+   495→        `/api/employees/${employeeId}/memory/${memoryId}`,
+   496→        input,
+   497→      ).then((r) => r.memory),
+   498→    onSuccess: () => {
+   499→      qc.invalidateQueries({ queryKey: employeeKeys.memory(employeeId) });
+   500→    },
+   501→  });
+   502→}
+   503→
+   504→/** DELETE `/api/employees/:id/memory/:memoryId`. */
+   505→export function useDeleteMemory(employeeId: string) {
+   506→  const qc = useQueryClient();
+   507→  return useMutation({
+   508→    mutationFn: (memoryId: string) =>
+   509→      apiRequest<{ deleted: boolean }>(
+   510→        "DELETE",
+   511→        `/api/employees/${employeeId}/memory/${memoryId}`,
+   512→      ).then((r) => r.deleted),
+   513→    onSuccess: () => {
+   514→      qc.invalidateQueries({ queryKey: employeeKeys.memory(employeeId) });
+   515→    },
+   516→  });
+   517→}
+   518→
+   519→/** GET `/api/employees/:id/memory/search?q=...`. */
+   520→export function useSearchMemory(employeeId: string | null, query: string) {
+   521→  return useQuery({
+   522→    queryKey: ["employees", "memory-search", employeeId, query] as const,
+   523→    queryFn: () => {
+   524→      const p = new URLSearchParams({ q: query });
+   525→      return apiRequest<{ memory: import("@/lib/employees/client").EmployeeMemory[] }>(
+   526→        "GET",
+   527→        `/api/employees/${employeeId}/memory/search?${p.toString()}`,
+   528→      ).then((r) => r.memory);
+   529→    },
+   530→    enabled: !!employeeId && query.trim().length > 0,
+   531→  });
+   532→}
+   533→
+   534→// ---------------------------------------------------------------------------
+   535→// Training
+   536→// ---------------------------------------------------------------------------
+   537→
+   538→/** GET `/api/employees/:id/training`. */
+   539→export function useEmployeeTraining(employeeId: string | null) {
+   540→  return useQuery({
+   541→    queryKey: employeeKeys.training(employeeId),
+   542→    queryFn: () =>
+   543→      apiRequest<{ training: EmployeeTraining[] }>(
+   544→        "GET",
+   545→        `/api/employees/${employeeId}/training`,
+   546→      ).then((r) => r.training),
+   547→    enabled: !!employeeId,
+   548→  });
+   549→}
+   550→
+   551→/** POST `/api/employees/:id/training` (source: url | document). */
+   552→export function useAddTraining(employeeId: string) {
+   553→  const qc = useQueryClient();
+   554→  return useMutation({
+   555→    mutationFn: (
+   556→      input:
+   557→        | ({ source: "url" } & TrainFromUrlInput)
+   558→        | ({ source: "document" } & TrainFromDocumentInput),
+   559→    ) =>
+   560→      apiRequest<{ training: EmployeeTraining }>(
+   561→        "POST",
+   562→        `/api/employees/${employeeId}/training`,
+   563→        input,
+   564→      ).then((r) => r.training),
+   565→    onSuccess: () => {
+   566→      qc.invalidateQueries({ queryKey: employeeKeys.training(employeeId) });
+   567→    },
+   568→  });
+   569→}
+   570→
+   571→/** DELETE `/api/employees/:id/training/:trainingId`. */
+   572→export function useDeleteTraining(employeeId: string) {
+   573→  const qc = useQueryClient();
+   574→  return useMutation({
+   575→    mutationFn: (trainingId: string) =>
+   576→      apiRequest<{ deleted: boolean }>(
+   577→        "DELETE",
+   578→        `/api/employees/${employeeId}/training/${trainingId}`,
+   579→      ).then((r) => r.deleted),
+   580→    onSuccess: () => {
+   581→      qc.invalidateQueries({ queryKey: employeeKeys.training(employeeId) });
+   582→    },
+   583→  });
+   584→}
+   585→
+   586→// ---------------------------------------------------------------------------
+   587→// Assignments
+   588→// ---------------------------------------------------------------------------
+   589→
+   590→/** GET `/api/employees/:id/assignments`. */
+   591→export function useEmployeeAssignments(employeeId: string | null) {
+   592→  return useQuery({
+   593→    queryKey: employeeKeys.assignments(employeeId),
+   594→    queryFn: () =>
+   595→      apiRequest<{
+   596→        assignments: import("@/lib/employees/client").EmployeeAssignment[];
+   597→      }>("GET", `/api/employees/${employeeId}/assignments`).then(
+   598→        (r) => r.assignments,
+   599→      ),
+   600→    enabled: !!employeeId,
+   601→  });
+   602→}
+   603→
+   604→/** POST `/api/employees/:id/assignments`. */
+   605→export function useAssignToWorkspace(employeeId: string) {
+   606→  const qc = useQueryClient();
+   607→  return useMutation({
+   608→    mutationFn: (input: AssignToWorkspaceInput) =>
+   609→      apiRequest<{
+   610→        assignment: import("@/lib/employees/client").EmployeeAssignment;
+   611→      }>("POST", `/api/employees/${employeeId}/assignments`, input).then(
+   612→        (r) => r.assignment,
+   613→      ),
+   614→    onSuccess: () => {
+   615→      qc.invalidateQueries({ queryKey: employeeKeys.assignments(employeeId) });
+   616→    },
+   617→  });
+   618→}
+   619→
+   620→/** DELETE `/api/employees/:id/assignments/:assignmentId`. */
+   621→export function useUnassign(employeeId: string) {
+   622→  const qc = useQueryClient();
+   623→  return useMutation({
+   624→    mutationFn: (assignmentId: string) =>
+   625→      apiRequest<{ removed: boolean }>(
+   626→        "DELETE",
+   627→        `/api/employees/${employeeId}/assignments/${assignmentId}`,
+   628→      ).then((r) => r.removed),
+   629→    onSuccess: () => {
+   630→      qc.invalidateQueries({ queryKey: employeeKeys.assignments(employeeId) });
+   631→    },
+   632→  });
+   633→}
+   634→
+   635→// ---------------------------------------------------------------------------
+   636→// Performance
+   637→// ---------------------------------------------------------------------------
+   638→
+   639→/** GET `/api/employees/:id/performance`. */
+   640→export function useEmployeePerformance(
+   641→  employeeId: string | null,
+   642→  opts: PerformanceQuery = {},
+   643→) {
+   644→  return useQuery({
+   645→    queryKey: employeeKeys.performance(employeeId, opts),
+   646→    queryFn: () => {
+   647→      const p = new URLSearchParams();
+   648→      if (opts.dateFrom) p.set("dateFrom", opts.dateFrom);
+   649→      if (opts.dateTo) p.set("dateTo", opts.dateTo);
+   650→      const qs = p.toString();
+   651→      return apiRequest<{ performance: EmployeePerformance[] }>(
+   652→        "GET",
+   653→        `/api/employees/${employeeId}/performance${qs ? `?${qs}` : ""}`,
+   654→      ).then((r) => r.performance);
+   655→    },
+   656→    enabled: !!employeeId,
+   657→  });
+   658→}
+   659→
+   660→// ---------------------------------------------------------------------------
+   661→// Versions
+   662→// ---------------------------------------------------------------------------
+   663→
+   664→/** GET `/api/employees/:id/versions`. */
+   665→export function useEmployeeVersions(employeeId: string | null) {
+   666→  return useQuery({
+   667→    queryKey: employeeKeys.versions(employeeId),
+   668→    queryFn: () =>
+   669→      apiRequest<{ versions: EmployeeVersion[] }>(
+   670→        "GET",
+   671→        `/api/employees/${employeeId}/versions`,
+   672→      ).then((r) => r.versions),
+   673→    enabled: !!employeeId,
+   674→  });
+   675→}
+   676→
+   677→/** POST `/api/employees/:id/versions`. */
+   678→export function useCreateVersion(employeeId: string) {
+   679→  const qc = useQueryClient();
+   680→  return useMutation({
+   681→    mutationFn: (input: CreateVersionInput) =>
+   682→      apiRequest<{ version: EmployeeVersion }>(
+   683→        "POST",
+   684→        `/api/employees/${employeeId}/versions`,
+   685→        input,
+   686→      ).then((r) => r.version),
+   687→    onSuccess: () => {
+   688→      qc.invalidateQueries({ queryKey: employeeKeys.versions(employeeId) });
+   689→      qc.invalidateQueries({ queryKey: employeeKeys.detail(employeeId) });
+   690→    },
+   691→  });
+   692→}
+   693→
+   694→/** POST `/api/employees/:id/versions/:version` (restore). */
+   695→export function useRestoreVersion(employeeId: string) {
+   696→  const qc = useQueryClient();
+   697→  return useMutation({
+   698→    mutationFn: (versionNumber: number) =>
+   699→      apiRequest<{ employee: EmployeeWithRelations }>(
+   700→        "POST",
+   701→        `/api/employees/${employeeId}/versions/${versionNumber}`,
+   702→      ).then((r) => r.employee),
+   703→    onSuccess: (employee) => {
+   704→      qc.setQueryData(employeeKeys.detail(employee.id), { employee });
+   705→      qc.invalidateQueries({ queryKey: employeeKeys.versions(employeeId) });
+   706→    },
+   707→  });
+   708→}
+   709→
+   710→// ---------------------------------------------------------------------------
+   711→// Chat
+   712→// ---------------------------------------------------------------------------
+   713→
+   714→/** POST `/api/employees/:id/chat`. */
+   715→export function useEmployeeChat(employeeId: string | null) {
+   716→  return useMutation({
+   717→    mutationFn: (message: string) =>
+   718→      apiRequest<{ result: EmployeeChatResult }>(
+   719→        "POST",
+   720→        `/api/employees/${employeeId}/chat`,
+   721→        { message },
+   722→      ).then((r) => r.result),
+   723→  });
+   724→}
+   725→
+   726→// ---------------------------------------------------------------------------
+   727→// Manager dashboard
+   728→// ---------------------------------------------------------------------------
+   729→
+   730→/** GET `/api/employees/dashboard`. */
+   731→export function useEmployeeDashboard() {
+   732→  return useQuery({
+   733→    queryKey: employeeKeys.dashboard,
+   734→    queryFn: () =>
+   735→      apiRequest<{ dashboard: EmployeeDashboardSummary }>(
+   736→        "GET",
+   737→        "/api/employees/dashboard",
+   738→      ).then((r) => r.dashboard),
+   739→    staleTime: 15 * 1000,
+   740→  });
+   741→}
+   742→
+   743→// ---------------------------------------------------------------------------
+   744→// Departments
+   745→// ---------------------------------------------------------------------------
+   746→
+   747→/** GET `/api/employees/departments`. */
+   748→export function useDepartments() {
+   749→  return useQuery({
+   750→    queryKey: employeeKeys.departments,
+   751→    queryFn: () =>
+   752→      apiRequest<{ departments: EmployeeDepartment[] }>(
+   753→        "GET",
+   754→        "/api/employees/departments",
+   755→      ).then((r) => r.departments),
+   756→    staleTime: 5 * 60 * 1000,
+   757→  });
+   758→}
+   759→
+   760→// ---------------------------------------------------------------------------
+   761→// Skill catalog
+   762→// ---------------------------------------------------------------------------
+   763→
+   764→/** GET `/api/employees/skills`. */
+   765→export function useSkillCatalog() {
+   766→  return useQuery({
+   767→    queryKey: employeeKeys.catalog,
+   768→    queryFn: () =>
+   769→      apiRequest<{
+   770→        skills: SkillDefinition[];
+   771→        categories: Array<{ id: SkillCategory; label: string; count: number }>;
+   772→        version: number;
+   773→      }>("GET", "/api/employees/skills").then((r) => ({
+   774→        skills: r.skills,
+   775→        categories: r.categories,
+   776→        version: r.version,
+   777→      })),
+   778→    staleTime: 5 * 60 * 1000,
+   779→  });
+   780→}
+   781→
+   782→// ---------------------------------------------------------------------------
+   783→// Marketplace
+   784→// ---------------------------------------------------------------------------
+   785→
+   786→/** GET `/api/employees/marketplace`. */
+   787→export function useMarketplace(opts: ListMarketplaceQuery = {}) {
+   788→  return useQuery({
+   789→    queryKey: employeeKeys.marketplace(opts),
+   790→    queryFn: () => {
+   791→      const p = new URLSearchParams();
+   792→      if (opts.category) p.set("category", opts.category);
+   793→      if (opts.search) p.set("search", opts.search);
+   794→      if (opts.featured !== undefined) p.set("featured", String(opts.featured));
+   795→      if (opts.limit) p.set("limit", String(opts.limit));
+   796→      if (opts.offset) p.set("offset", String(opts.offset));
+   797→      const qs = p.toString();
+   798→      return apiRequest<{ entries: EmployeeMarketplaceEntry[] }>(
+   799→        "GET",
+   800→        `/api/employees/marketplace${qs ? `?${qs}` : ""}`,
+   801→      ).then((r) => r.entries);
+   802→    },
+   803→    staleTime: 30 * 1000,
+   804→  });
+   805→}
+   806→
+   807→/** GET `/api/employees/marketplace/:id`. */
+   808→export function useMarketplaceEntry(id: string | null) {
+   809→  return useQuery({
+   810→    queryKey: employeeKeys.marketplaceEntry(id),
+   811→    queryFn: () =>
+   812→      apiRequest<{ entry: EmployeeMarketplaceEntry }>(
+   813→        "GET",
+   814→        `/api/employees/marketplace/${id}`,
+   815→      ).then((r) => r.entry),
+   816→    enabled: !!id,
+   817→  });
+   818→}
+   819→
+   820→/** POST `/api/employees/marketplace/:id` (publish / update). */
+   821→export function usePublishToMarketplace() {
+   822→  const qc = useQueryClient();
+   823→  return useMutation({
+   824→    mutationFn: ({
+   825→      employeeId,
+   826→      input,
+   827→    }: {
+   828→      employeeId: string;
+   829→      input: PublishToMarketplaceInput;
+   830→    }) =>
+   831→      apiRequest<{ entry: EmployeeMarketplaceEntry }>(
+   832→        "POST",
+   833→        `/api/employees/marketplace/${employeeId}`,
+   834→        input,
+   835→      ).then((r) => r.entry),
+   836→    onSuccess: () => {
+   837→      qc.invalidateQueries({ queryKey: ["employees", "marketplace"] });
+   838→    },
+   839→  });
+   840→}
+   841→
+   842→/** POST `/api/employees/marketplace/:id/install`. */
+   843→export function useInstallFromMarketplace() {
+   844→  const qc = useQueryClient();
+   845→  return useMutation({
+   846→    mutationFn: (marketplaceId: string) =>
+   847→      apiRequest<{ employee: EmployeeWithRelations }>(
+   848→        "POST",
+   849→        `/api/employees/marketplace/${marketplaceId}/install`,
+   850→      ).then((r) => r.employee),
+   851→    onSuccess: (employee) => {
+   852→      qc.setQueryData(employeeKeys.detail(employee.id), { employee });
+   853→      qc.invalidateQueries({ queryKey: ["employees", "list"] });
+   854→      qc.invalidateQueries({ queryKey: ["employees", "marketplace"] });
+   855→      qc.invalidateQueries({ queryKey: employeeKeys.dashboard });
+   856→    },
+   857→  });
+   858→}
+   859→
+   860→/** POST `/api/employees/marketplace/:id/rate`. */
+   861→export function useRateMarketplaceEntry() {
+   862→  const qc = useQueryClient();
+   863→  return useMutation({
+   864→    mutationFn: ({
+   865→      marketplaceId,
+   866→      rating,
+   867→    }: {
+   868→      marketplaceId: string;
+   869→      rating: 1 | 2 | 3 | 4 | 5;
+   870→    }) =>
+   871→      apiRequest<{ entry: EmployeeMarketplaceEntry }>(
+   872→        "POST",
+   873→        `/api/employees/marketplace/${marketplaceId}/rate`,
+   874→        { rating },
+   875→      ).then((r) => r.entry),
+   876→    onSuccess: (entry) => {
+   877→      qc.setQueryData(employeeKeys.marketplaceEntry(entry.id), { entry });
+   878→      qc.invalidateQueries({ queryKey: ["employees", "marketplace"] });
+   879→    },
+   880→  });
+   881→}
+   882→
+   883→// ---------------------------------------------------------------------------
+   884→// Inter-employee messages
+   885→// ---------------------------------------------------------------------------
+   886→
+   887→/** GET `/api/employees/messages`. */
+   888→export function useEmployeeMessages(
+   889→  opts: { fromId?: string; toId?: string; limit?: number } = {},
+   890→) {
+   891→  return useQuery({
+   892→    queryKey: employeeKeys.messages(opts),
+   893→    queryFn: () => {
+   894→      const p = new URLSearchParams();
+   895→      if (opts.fromId) p.set("fromId", opts.fromId);
+   896→      if (opts.toId) p.set("toId", opts.toId);
+   897→      if (opts.limit) p.set("limit", String(opts.limit));
+   898→      const qs = p.toString();
+   899→      return apiRequest<{ messages: EmployeeMessage[] }>(
+   900→        "GET",
+   901→        `/api/employees/messages${qs ? `?${qs}` : ""}`,
+   902→      ).then((r) => r.messages);
+   903→    },
+   904→    staleTime: 5 * 1000,
+   905→  });
+   906→}
+   907→
+   908→/** POST `/api/employees/messages`. */
+   909→export function useSendMessage() {
+   910→  const qc = useQueryClient();
+   911→  return useMutation({
+   912→    mutationFn: ({
+   913→      fromEmployeeId,
+   914→      toEmployeeId,
+   915→      input,
+   916→    }: {
+   917→      fromEmployeeId: string;
+   918→      toEmployeeId: string;
+   919→      input: SendMessageInput;
+   920→    }) =>
+   921→      apiRequest<{ message: EmployeeMessage }>(
+   922→        "POST",
+   923→        "/api/employees/messages",
+   924→        {
+   925→          fromEmployeeId,
+   926→          toEmployeeId,
+   927→          ...input,
+   928→        },
+   929→      ).then((r) => r.message),
+   930→    onSuccess: () => {
+   931→      qc.invalidateQueries({ queryKey: ["employees", "messages"] });
+   932→    },
+   933→  });
+   934→}
+   935→
+   936→// ---------------------------------------------------------------------------
+   937→// Re-exports for convenience
+   938→// ---------------------------------------------------------------------------
+   939→
+   940→export type {
+   941→  EmployeeWithRelations,
+   942→  EmployeeSkill,
+   943→  EmployeePerformance,
+   944→  EmployeeMessage,
+   945→  EmployeeMarketplaceEntry,
+   946→  EmployeeVersion,
+   947→  EmployeeDashboardSummary,
+   948→  EmployeeChatResult,
+   949→  MemoryType,
+   950→} from "@/lib/employees/client";
+   951→

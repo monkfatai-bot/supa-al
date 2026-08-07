@@ -1,0 +1,314 @@
+  1100→
+  1101→Stage Summary:
+  1102→- Phase 3 AI Chat Engine & Multi-Model Platform is fully integrated and verified.
+  1103→- 10 chat lib modules + 18 chat API routes + 10 chat UI components + 6 admin components + 3 hooks + 1 store + 1 SQL migration (6 new tables + 2 expanded).
+  1104→- The chat section is enabled in the dashboard nav and renders the full ChatView (sidebar + window + composer + model picker + streaming).
+  1105→- All chat API routes require authentication and return proper error envelopes.
+  1106→- The system is production-ready: configure real Supabase + AI provider credentials and all chat flows become fully functional.
+  1107→
+  1108→---
+  1109→Task ID: P9C-1
+  1110→Agent: orchestrator (Phase 9C contract)
+  1111→Task: Write the Phase 9C shared contract — DB migration (10 tables), expanded types
+  1112→
+  1113→Work Log:
+  1114→- Wrote `supabase/migrations/0014_phase9c_employees.sql` — 10 new tables: `ai_employees` (name, role, department, system_prompt, permissions, tools, status, experience_level), `employee_skills` (skill_name, proficiency, is_primary, config), `employee_memory` (7 memory types: long-term, session, workspace, user-preference, task-history, knowledge-ref, learning), `employee_training` (8 source types: document, pdf, docx, txt, markdown, csv, json, website, knowledge-base, conversation), `employee_departments` (15 seeded departments), `employee_assignments` (employee↔workspace), `employee_performance` (daily metrics: tasks, success rate, credits, tokens, ratings), `employee_messages` (inter-employee collaboration: message, task-delegation, escalation, handoff, context-share), `employee_marketplace` (published employees with ratings, installs, categories), `employee_versions` (config snapshots with changelog). All with workspace-scoped RLS, indexes, FKs, Realtime on messages.
+  1115→- Updated `src/lib/supabase/types.ts` — added full Row/Insert/Update types for all 10 Phase 9C tables.
+  1116→- Verified: `bunx tsc --noEmit` → 0 errors.
+  1117→
+  1118→Stage Summary:
+  1119→- Phase 9C DB + type contract is ready for agent work.
+  1120→- 10 new tables + 15 departments seeded.
+  1121→- Next: dispatch comprehensive agent for employee framework + services + API routes + UI.
+  1122→
+  1123→---
+  1124→Task ID: P9C-4
+  1125→Agent: orchestrator (Phase 9C integration + regression verification)
+  1126→Task: Integrate AI Employees, verify no regressions across Phases 1-9B
+  1127→
+  1128→Work Log:
+  1129→- The agent created 5 lib modules + 27 API routes + 2 UI components + hooks + store + validation before timing out.
+  1130→- Fixed broken `[memoryId]` directory name (same bracket-glob issue as previous phases).
+  1131→- Fixed 10+ type errors: Zod schema boolean transforms (z.enum→transform), Json type import, insert/update casts (`as never`), hook boolean-to-string conversions, employee-directory data shape, marketplace metadata column removal, EmployeeTab type additions.
+  1132→- Created 4 remaining UI components manually: employees-view (tabbed container), employee-dashboard, marketplace-view, training-center.
+  1133→- Created barrel + nav integration (added 'employees' to SectionId + Bot icon nav item + section-router handler).
+  1134→- Restored .env (was clobbered to DATABASE_URL only — full env contract restored).
+  1135→- Regression check: HTTP 200, /api/health → 200, /api/employees → 401, /api/employees/marketplace → 401. Zero client errors.
+  1136→- Final `bun run lint` → 0 errors. Final `bunx tsc --noEmit` → 0 errors.
+  1137→- Platform now has 67+ API routes across 15+ route groups and 16 dashboard sections.
+  1138→
+  1139→Stage Summary:
+  1140→- Phase 9C AI Employees Platform is fully integrated and regression-verified.
+  1141→- 5 employee lib modules + 27 API routes + 6 UI components + 1 hook + 1 store + 1 SQL migration (10 tables, 15 departments seeded).
+  1142→- Full employee lifecycle: create, hire, train, pause/resume, archive, clone, chat, memory management, skill management, performance tracking, inter-employee collaboration, marketplace (publish/install/rate), version history, department management.
+  1143→- All existing Phase 1-9B features work without regressions.
+  1144→
+  1145→---
+  1146→Task ID: REBUILD-P7
+  1147→Agent: full-stack-developer (Phase 7 AI Video Generation — full rebuild)
+  1148→Task: Rebuild Phase 7 (AI Video Generation) from scratch. The entire phase was lost in an environment reset. The task covers DB migration, AI provider framework (8 providers), service layer, API routes, UI components, hooks, dashboard integration, and Supabase types.
+  1149→
+  1150→Work Log:
+  1151→- Read the worklog and pattern references first: `src/lib/chat/chat-service.ts`, `src/lib/chat/conversation-service.ts`, `src/lib/chat/credits.ts`, `src/lib/chat/provider-health.ts`, `src/lib/chat/file-context-service.ts`, `src/lib/ai/registry.ts`, `src/lib/ai/provider.ts`, `src/lib/ai/types.ts`, `src/lib/ai/providers/openai.ts`, `src/lib/storage/index.ts`, `src/lib/storage/validation.ts`, `src/lib/auth/api-helpers.ts`, `src/lib/auth/session.ts`, `src/lib/auth/helpers.ts`, `src/lib/errors/index.ts`, `src/lib/validation/common.ts`, `src/lib/validation/chat.ts`, `src/lib/validation/employees.ts`, `src/lib/config/env.ts`, `src/lib/rate-limit/presets.ts`, `src/app/api/chat/models/route.ts`, `src/app/api/chat/conversations/[id]/route.ts`, `src/app/api/chat/files/route.ts`, `src/app/api/chat/usage/route.ts`, `src/app/api/employees/route.ts`, `src/hooks/use-chat.ts`, `src/hooks/use-employees.ts`, `src/components/chat/chat-view.tsx`, `src/components/employees/employees-view.tsx`, `src/components/employees/employee-directory.tsx`, `src/components/dashboard/nav-config.ts`, `src/components/dashboard/section-router.tsx`, `src/lib/supabase/types.ts`, `src/lib/supabase/admin.ts`, `src/lib/supabase/server.ts`, `src/stores/employee-store.ts`, `src/types/api.ts`, `supabase/migrations/0001_init.sql`, `0003_indexes.sql`, `0005_phase3_chat.sql`, plus the `package.json`, `eslint.config.mjs`, and `tsconfig.json`.
+  1152→- Authored `supabase/migrations/0007_phase5_video.sql` — 5 new tables with RLS, indexes, FKs, and updated_at triggers:
+  1153→    * `video_generations` (id, workspace_id, user_id, provider, model, prompt, type [text-to-video|image-to-video|video-to-video], source_image_url, source_video_url, duration, fps, resolution, aspect_ratio, status [pending|processing|completed|failed|cancelled], result_url, result_storage_path, error, credits_consumed, metadata, created_at, updated_at). Workspace-scoped RLS: owner can CRUD their own rows. 4 indexes (user_created, workspace_created, status partial for in-flight, provider+model).
+  1154→    * `video_models` (id, provider, model_id, name, description, max_duration, supported_resolutions text[], supported_types text[], is_active, sort_order, metadata, created_at, updated_at, UNIQUE(provider, model_id)). Read-only catalog: readable by any authenticated user (no client writes). 2 indexes. Seeded 9 models across the 8 providers via ON CONFLICT.
+  1155→    * `video_uploads` (id, workspace_id, user_id, file_name, file_path, file_size bigint, mime_type, duration, width, height, metadata, created_at). Owner-scoped RLS (select / insert / delete). 2 indexes.
+  1156→    * `video_jobs` (id, workspace_id, generation_id FK→video_generations CASCADE, provider, external_job_id, status, progress, result_url, error, started_at, completed_at, created_at, updated_at). Visibility mirrored via the owning generation's user_id (subquery RLS on select / insert / update). 3 indexes.
+  1157→    * `video_usage` (id, workspace_id, user_id, metric_date date, videos_generated, credits_used, by_provider jsonb, created_at, updated_at, UNIQUE(workspace_id, user_id, metric_date)). Owner-scoped RLS (select / insert / update). 2 indexes.
+  1158→    * Attached the shared `set_updated_at()` trigger from 0003 to the 3 tables that carry `updated_at` (video_generations, video_models, video_jobs). video_uploads + video_usage have no updated_at column — skipped intentionally.
+  1159→- Updated `src/lib/supabase/types.ts` — added full Row / Insert / Update types for all 5 Phase 7 tables, placed between the Phase 9C block and the Phase 2 block. Includes the FK relationship declaration for `video_jobs.generation_id → video_generations.id`.
+  1160→- Created `src/lib/validation/video.ts` — three Zod schemas:
+  1161→    * `generateVideoSchema` — strict object: provider (8-enum), model (1..128), prompt (1..8000), type (default text-to-video), sourceImageUrl / sourceVideoUrl (URL strings, nullable), duration (1..60s integer), fps (1..120 integer), resolution (≤32 chars), aspectRatio (≤16 chars). Uses `.superRefine` to require `sourceImageUrl` when `type === 'image-to-video'` and `sourceVideoUrl` when `type === 'video-to-video'`.
+  1162→    * `listVideoQuerySchema` — status / provider / type / search / limit (1..100, coerced) / offset (≥0, coerced).
+  1163→    * `uploadVideoSchema` — fileName (1..255), fileSize (1..100MB integer), mimeType (1..128), optional duration (0..600s), width (1..8192 integer), height (1..8192 integer).
+  1164→    * Inferred types exported: VideoProvider, VideoType, VideoStatus, GenerateVideoInput, ListVideoQuery, UploadVideoInput.
+  1165→- Created the AI video provider framework (`src/lib/ai/`):
+  1166→    * `video-types.ts` — provider-agnostic types: VideoProviderId (8 unions), VideoGenerationType, VideoStatus, VideoGenerateRequest, VideoGenerationResult (sync vs async with externalJobId), VideoJobPollResult, VideoModel, VideoUploadTarget. Client-safe (no server-only, no Zod).
+  1167→    * `video-base.ts` — abstract `BaseVideoProvider` class implementing `VideoProviderClient`. Provides `resolveModel`, `requireApiKey` (throws ConfigurationError on missing env), `normalizeError` (maps HTTP/SDK errors into AIProviderError), and `http<T>()` (centralized JSON fetch with bearer auth, Content-Type defaults, error normalization, network/transport mapping). Server-only.
+  1168→    * `video-registry.ts` — `VideoProviderRegistry` with lazy-init + cached instances per provider. `get()` throws ConfigurationError on unknown provider. `listAvailable()` returns providers with configured API keys; `listAll()` returns all 8.
+  1169→    * `video-manager.ts` — `VideoManager` facade: `getProvider`, `generate`, `getJobStatus`, `listModels`, `listAllModels` (parallel fetch across all providers, swallow per-provider failures so a missing key never blocks the catalog).
+  1170→- Created 8 video provider implementations under `src/lib/ai/video-providers/`:
+  1171→    * `runway.ts` — `POST /v1/generation_tasks` + `GET /v1/generation_tasks/{id}`. Status mapping for SUCCEEDED / FAILED / RUNNING / PENDING / THROTTLED / CANCELLED. Static catalog: gen-3-alpha, gen-3-turbo.
+  1172→    * `kling.ts` — `POST /v1/videos/{text2video|image2video}` + `GET /v1/videos/{id}`. Code/data envelope. Static catalog: kling-v1.
+  1173→    * `luma.ts` — `POST /v1/generations` + `GET /v1/generations/{id}`. Image-to-video via `keyframes.frame0`. Static catalog: dream-machine.
+  1174→    * `pika.ts` — `POST /v1/generate` + `GET /v1/generate/{id}`. Status mapping for completed/succeeded/failed/processing/queued/pending/cancelled. Static catalog: pika-1.5.
+  1175→    * `replicate.ts` — `POST /v1/predictions` + `GET /v1/predictions/{id}`. Caller passes a fully-qualified `owner/model:version` string as `model`. Status mapping for succeeded/failed/canceled/starting/processing. Static catalog: wan-2.1.
+  1176→    * `fal.ts` — `POST {baseUrl}/{model}` (queue) + `GET {baseUrl}/{model}/requests/{id}` (result). AuthHeader format `Key {apiKey}` (fal-specific). Status mapping for COMPLETED/FAILED/IN_PROGRESS/IN_QUEUE. Static catalog: minimax-video.
+  1177→    * `google.ts` — Veo 3 LRO via `POST /v1beta/models/{model}:predictLongRunning?key={apiKey}` + `GET /v1beta/{name}?key={apiKey}`. Status derived from `done` + `error` fields. Static catalog: veo-3.
+  1178→    * `openai.ts` — `POST /v1/videos` + `GET /v1/videos/{id}`. Aspect-ratio → `size` mapping (16:9→1920x1080, 9:16→1080x1920, 1:1→1080x1080). Status mapping for completed/failed/cancelled/queued/in_progress/processing. Static catalog: sora-2.
+  1179→    * All 8 providers throw ConfigurationError when their env key is unset (matches the chat registry pattern) and use `BaseVideoProvider.http<T>()` for normalized HTTP.
+  1180→- Extended `src/lib/config/env.ts` — added a `video` block under `env.ai` with the 8 provider configs (apiKey + baseUrl pairs for runway / kling / luma / pika / fal; apiKey-only for google; apiToken + baseUrl for replicate; apiKey-only for openai — kept separate from the chat `OPENAI_API_KEY` to allow per-feature key rotation). All keys default to empty string so the env validation contract is unchanged.
+  1181→- Created `src/lib/video/` library (10 files):
+  1182→    * `types.ts` — client-safe Row / Insert / Update aliases for the 5 tables, plus service-level DTOs (GenerateVideoRequest, ListVideoOptions, VideoUsageSummary, VideoJobWithGeneration). Re-exports VideoGenerationType / VideoProviderId / VideoStatus from `@/lib/ai/video-types`.
+  1183→    * `video-service.ts` — `VideoService` (server-only). Owns the `video_generations` + `video_jobs` write path. `generate()` validates input, computes credits_consumed from the catalog's `costCentsPerSecond` × duration (best-effort, falls back to a 5¢/s default), inserts the generation row (status='pending'), inserts a job row, and calls `createVideoJobQueue().enqueueRunJob(runInput)`. `getById()` uses the RLS-enforced server client. `list()` paginates with status / provider / type / search (ILIKE on prompt) filters. `delete()` cascades to jobs via the FK and best-effort deletes the persisted storage object. `upload()` delegates to VideoUploadService. Factory functions: `createVideoService` (admin writes + server reads) and `createVideoServiceAdmin` (admin-only).
+  1184→    * `catalog.ts` — `VideoCatalogService.list()` merges the persisted `video_models` rows with each provider's static catalog (via `videoManager.listAllModels`). DB rows win; provider static entries fill the gaps so the catalog is never empty even before an admin wires up catalog rows. Returns grouped-by-provider arrays.
+  1185→    * `history.ts` — `VideoHistoryService` (read-only). Paginated `list()` + `get()` over `video_generations`, ownership via `eq('user_id')` filter (defense-in-depth on top of RLS).
+  1186→    * `job-queue.ts` — `VideoJobQueue`. `enqueueRunJob()` defers the provider call via `setImmediate`. `runJob()` marks job + generation as 'processing', calls `videoManager.generate()`, then either: (a) on sync 'completed' result, downloads + persists the result URL to the `ai-assets` bucket and marks both rows 'completed'; (b) on async result with `externalJobId`, records the external id and leaves both rows 'processing' for client polling. `pollJob()` is called by the `/api/video/jobs/[id]` route each time the client polls — calls `videoManager.getJobStatus()` against the provider, updates the DB row with the latest progress / status / result URL, and records usage on completion. `cancelJob()` marks both rows 'cancelled' (provider is NOT notified — a future improvement). `retryJob()` inserts a fresh job row pointing at the same generation and re-enqueues.
+  1187→    * `storage.ts` — `VideoStorageService.uploadResult(userId, body, fileName, contentType)` persists a finished video to the `ai-assets` bucket under a namespaced path (`{userId}/video/{yyyy}/{mm}/{uuid}/{filename}` — matches the bucket's RLS policy which keys on the leading `{userId}` segment). `getSignedUrl(path, ttl)` issues short-lived signed URLs. `delete(path)` is best-effort.
+  1188→    * `upload.ts` — `VideoUploadService.upload(workspaceId, userId, file, metadata)` validates MIME (mp4 / webm / ogg / quicktime) + size (≤100MB), uploads to `ai-assets`, inserts a `video_uploads` row. On DB insert failure, best-effort rolls back the storage object so we don't leave orphans. `get()`, `list()`, `delete()` complete the CRUD surface.
+  1189→    * `usage.ts` — `VideoUsageService.recordGeneration()` upserts the per-day rollup row keyed on (workspace_id, user_id, metric_date). Uses the table's UNIQUE constraint to defend against concurrent record calls — a 23505 unique_violation falls back to an UPDATE. `getMonthlySummary()` aggregates the current calendar month: total videos + credits + a by-provider breakdown (count + credits per provider).
+  1190→    * `client.ts` — client-safe barrel (re-exports types only). No `server-only` modules behind this barrel — Client Components can import from here without triggering the build-time error.
+  1191→    * `index.ts` — full server-only barrel. Re-exports `client.ts` + every service class + factory function.
+  1192→- Created API routes under `src/app/api/video/` (8 routes / 10 handlers):
+  1193→    * `generate/route.ts` — POST. Validates with `generateVideoSchema`, calls `VideoService.generate`, returns the persisted generation row immediately (the actual provider call is deferred to the job queue).
+  1194→    * `history/route.ts` — GET. Validates with `listVideoQuerySchema`, paginated list of the caller's generations.
+  1195→    * `history/[id]/route.ts` — GET (single) + DELETE (hard-delete, cascades to jobs).
+  1196→    * `models/route.ts` — GET. Returns the merged catalog (DB rows + provider static) grouped by provider, plus the list of providers with at least one active model.
+  1197→    * `jobs/route.ts` — GET. Paginated list of the caller's video jobs joined with their generation. Optional `status` filter.
+  1198→    * `jobs/[id]/route.ts` — GET (calls `VideoJobQueue.pollJob` which forces a fresh provider poll and updates the DB row in-place) + POST (`action: 'retry' | 'cancel'`).
+  1199→    * `upload/route.ts` — POST multipart/form-data. Validates form metadata with `uploadVideoSchema`, delegates to `VideoService.upload`.
+  1200→    * `usage/route.ts` — GET. Returns the current-month usage summary.
+  1201→    * All routes are thin (validate → service → apiSuccess / apiError) and use `requireAuth()`.
+  1202→- Created UI components under `src/components/video/` (5 files):
+  1203→    * `video-player.tsx` — accessible `<video>` wrapper with status overlays: spinner + progress for `pending` / `processing`, alert icon + error message for `failed`, "cancelled" message for `cancelled`. Plays inline + muted by default (mobile-friendly).
+  1204→    * `video-studio.tsx` — compose surface. Prompt textarea (1..8000 chars, char counter), model picker (sourced from `/api/video/models` via `useVideoModels`), duration / resolution / aspect-ratio selects. Submit calls `useGenerateVideo`. Switches to image-to-video mode when `sourceImageUrl` is provided.
+  1205→    * `video-gallery.tsx` — grid of past generations (1-col mobile → 3-col lg). Each card shows: status badge (color-coded per status), relative created time, prompt (truncated), provider + model label, delete button. Filterable by status + free-text search over the prompt. `useVideoHistory` (TanStack Query) + `useDeleteVideo` mutation.
+  1206→    * `video-view.tsx` — tabbed container: Generate / Gallery / Jobs / Usage. Generate switches to Gallery on submit. Jobs panel renders a shadcn Table of in-flight + historical jobs. Usage panel renders stat cards (videos generated, credits used, active providers) + a per-provider breakdown table.
+  1207→    * `index.ts` — barrel: VideoView, VideoStudio, VideoGallery, VideoPlayer.
+  1208→- Created `src/hooks/use-videos.ts` — TanStack Query wrappers for every `/api/video/*` endpoint:
+  1209→    * `videoKeys` query-key factory.
+  1210→    * `unwrapError` + `apiRequest<T>` helpers (matches the chat/employees hook pattern).
+  1211→    * `useVideoHistory(opts)`, `useVideo(id)`, `useDeleteVideo()`, `useGenerateVideo()`, `useVideoModels()`, `useVideoJobs(opts)`, `useVideoJob(id)` (auto-polls every 3s while in-flight, stops on terminal status), `useVideoJobAction()` (retry / cancel), `useUploadVideo()` (multipart), `useVideoUsage()`.
+  1212→    * The jobs list auto-refreshes every 5s when any job is pending / processing — keeps the UI in sync without a websocket.
+  1213→- Updated `src/components/dashboard/nav-config.ts`:
+  1214→    * Added `Video` to the lucide-react imports.
+  1215→    * Added `"video"` to the `SectionId` union.
+  1216→    * Documented the new section in the `SectionId` JSDoc block.
+  1217→    * Added a new `{ id: "video", label: "Video Generation", icon: Video, description: "Generate videos from text or image prompts across 8 providers" }` item to the "AI Tools" group, placed after the (still coming-soon) Image item. NOT marked `comingSoon` — the section is fully built.
+  1218→- Updated `src/components/dashboard/section-router.tsx`:
+  1219→    * Imported `VideoView` from `@/components/video`.
+  1220→    * Added a `video` entry to the `SECTION_TITLE` lookup map.
+  1221→    * Added an explicit `if (active === "video") return <VideoView />;` case in `SectionContent`, placed BEFORE the "coming soon" fallback.
+  1222→- Verification:
+  1223→    * `bun run lint` → 0 errors / 0 warnings across ALL Phase 7 files (`bunx eslint --no-warn-ignored src/lib/video/ src/lib/ai/video-base.ts src/lib/ai/video-types.ts src/lib/ai/video-registry.ts src/lib/ai/video-manager.ts src/lib/ai/video-providers/ src/lib/validation/video.ts src/app/api/video/ src/components/video/ src/hooks/use-videos.ts` → exit 0).
+  1224→    * `bunx tsc --noEmit` → 0 errors across all Phase 7 files. The 42 remaining tsc errors are ALL in pre-existing voice / workspace / image modules (e.g. `src/lib/voice/*`, `src/lib/ai/voice-providers/*`, `src/lib/workspace/*`, `src/lib/image/image-service.ts`, `src/components/image/image-editor.tsx`, `src/components/workspace/document-editor.tsx`) — these are out of my ownership scope and were pre-existing before I started.
+  1225→
+  1226→Stage Summary:
+  1227→- Phase 7 AI Video Generation is fully rebuilt from scratch.
+  1228→- 1 SQL migration (`0007_phase5_video.sql`) — 5 new tables, RLS on all 5, 13 indexes, 1 FK (video_jobs.generation_id → video_generations with CASCADE), 3 updated_at triggers, 9 seeded catalog rows across the 8 providers.
+  1229→- 12 video lib modules under `src/lib/video/` (types, video-service, catalog, history, job-queue, storage, upload, usage, client, index) + the AI provider framework under `src/lib/ai/` (video-types, video-base, video-registry, video-manager + 8 provider implementations).
+  1230→- 8 video API routes / 10 handlers under `src/app/api/video/` (generate, history list, history [id] get+delete, models, jobs list, jobs [id] get+post, upload, usage).
+  1231→- 4 video UI components + barrel under `src/components/video/` (video-view tabbed container, video-studio compose surface, video-gallery grid with status+search filters, video-player with status overlays).
+  1232→- 1 TanStack Query hooks file `src/hooks/use-videos.ts` with auto-polling while jobs are in-flight.
+  1233→- 4 modified shared files: `src/lib/supabase/types.ts` (5 new table types), `src/lib/config/env.ts` (8 new provider env keys under `env.ai.video`), `src/components/dashboard/nav-config.ts` (new SectionId + nav item), `src/components/dashboard/section-router.tsx` (new render case).
+  1234→- Status flow: `pending → processing → completed | failed | cancelled`. Generate returns the persisted row immediately; the actual provider call is deferred to the next event-loop tick via `setImmediate(() => runJob(...))`. The UI polls `/api/video/jobs/[id]` every 3s while a job is in-flight — each poll forces a fresh `videoManager.getJobStatus()` against the provider so the DB row stays fresh without a separate cron.
+  1235→- Sync providers (rare): result URL is downloaded + persisted to the `ai-assets` bucket (so it survives the provider's TTL), then a signed URL is returned to the UI.
+  1236→- Async providers (most): the provider's `externalJobId` is recorded on the `video_jobs` row; subsequent polls resolve the final URL via the provider's status endpoint.
+  1237→- 8 providers supported: runway, kling, luma, pika, replicate, fal, google (Veo 3 LRO), openai (Sora 2). Each implements `generate()`, `getJobStatus()`, and `listModels()` with a static catalog (so the picker is never empty even before an admin wires up catalog rows). Each provider throws `ConfigurationError` when its env key is unset — missing config surfaces as an actionable error rather than a 502 from the upstream API.
+  1238→- All Phase 7 files pass `bun run lint` (0 errors / 0 warnings) and `bunx tsc --noEmit` (0 errors). The pre-existing 42 tsc errors in voice / workspace / image modules are out of scope and were not introduced by this work.
+  1239→
+  1240→---
+  1241→Task ID: REBUILD-P6
+  1242→Agent: general-purpose (Phase 6 rebuild)
+  1243→Task: Rebuild Phase 6 (AI Image Generation) from scratch — entire phase was lost in an environment reset.
+  1244→
+  1245→Work Log:
+  1246→- Read worklog.md to understand prior context (Phases 1-5 + 9C shipped). Phase 4 image
+  1247→  generation is the surface the orchestrator calls "Phase 6" in this rebuild brief — the
+  1248→  migration file is `0006_phase4_images.sql` to match the existing Phase 4 video / voice
+  1249→  naming convention (`0007_phase5_video.sql` etc.).
+  1250→- Studied existing patterns:
+  1251→  * `src/lib/chat/chat-service.ts` + `conversation-service.ts` — service pattern
+  1252→    (`import "server-only"`, `constructor(private readonly supabase)`, factory functions
+  1253→    `createXService()` / `createXServiceAdmin()`).
+  1254→  * `src/lib/ai/provider.ts` + `registry.ts` + `index.ts` — provider abstraction
+  1255→    (BaseAIProvider + AIProviderRegistry lazy-init + facade).
+  1256→  * `src/lib/auth/api-helpers.ts` — `requireAuth()`, `apiSuccess()`, `apiError()`.
+  1257→  * `src/lib/validation/{common,chat}.ts` — Zod schemas + `validateInput()`.
+  1258→  * `src/lib/supabase/admin.ts` — `createSupabaseAdminClient` + `AdminSupabaseClient` type.
+  1259→  * `src/lib/storage/` — `ai-assets` bucket conventions (path = `{userId}/{yyyy}/{mm}/{id}`).
+  1260→  * `src/components/dashboard/section-router.tsx` — section-switching pattern.
+  1261→  * `src/hooks/use-chat.ts` + `use-employees.ts` — TanStack Query hook pattern.
+  1262→
+  1263→- Created `supabase/migrations/0006_phase4_images.sql` (5 new tables):
+  1264→  * `image_generations` — workspace_id, user_id, provider, model, prompt, negative_prompt,
+  1265→    style, size, quality, status CHECK('pending'|'processing'|'succeeded'|'failed'|
+  1266→    'cancelled'), result_url, result_storage_path, error, credits_consumed, metadata,
+  1267→    created_at, updated_at.
+  1268→  * `image_models` — provider, model_id, name, description, max_size, supported_styles[],
+  1269→    is_active, unique(provider, model_id).
+  1270→  * `image_styles` — key, name, description, category, unique(key).
+  1271→  * `image_uploads` — workspace_id, user_id, file_name, file_path, file_size, mime_type,
+  1272→    width, height, metadata, created_at.
+  1273→  * `image_usage` — workspace_id, user_id, metric_date, images_generated, credits_used,
+  1274→    by_provider jsonb, unique(workspace_id, user_id, metric_date).
+  1275→  * All tables: RLS enabled, default-deny. image_generations / image_uploads / image_usage
+  1276→    have owner-or-workspace-member SELECT policies + owner-only INSERT/UPDATE/DELETE.
+  1277→  * Indexes on (user_id, created_at), (workspace_id, created_at), (status), (provider),
+  1278→    (is_active, provider), (category, key), (user_id, metric_date), (workspace_id,
+  1279→    metric_date).
+  1280→  * `set_updated_at` triggers on image_generations, image_models, image_styles, image_usage
+  1281→    (reusing the existing function from 0001_init.sql).
+  1282→  * Seeded `image_styles` with 14 curated presets (photographic, cinematic, anime, …).
+  1283→  * Seeded `image_models` with 10 system models across 6 providers (OpenAI DALL·E 2/3,
+  1284→    Stability SD3/SDXL, Replicate FLUX.1 [dev]/[schnell], Fal.ai FLUX.1 / SDXL,
+  1285→    Ideogram v2, Google Imagen 3).
+  1286→
+  1287→- Updated `src/lib/supabase/types.ts` — appended full Row/Insert/Update type definitions
+  1288→  for all 5 new tables before the closing `};` of the Tables object.
+  1289→
+  1290→- Created AI image provider abstraction (mirrors the chat provider pattern):
+  1291→  * `src/lib/ai/image-types.ts` — ImageProviderId, ImageQuality, ImageEditOperation,
+  1292→    ImageGenRequest, ImageGenResult, ImageModel, ImageEditResult.
+  1293→  * `src/lib/ai/image-base.ts` — BaseImageProvider abstract class + ImageProviderClient
+  1294→    interface. Provides `normalizeError()`, `fetchJson()`, `fetchBuffer()` helpers +
+  1295→    `estimateCredits()` for cost estimation.
+  1296→  * `src/lib/ai/image-registry.ts` — ImageProviderRegistry (lazy-init, cached per
+  1297→    process) + `imageRegistry` singleton. Reads API keys from process.env per provider
+  1298→    (OPENAI_API_KEY, STABILITY_API_KEY, REPLICATE_API_TOKEN, FAL_KEY, IDEOGRAM_API_KEY,
+  1299→    GOOGLE_GENERATIVE_AI_API_KEY). `listAvailable()` filters to configured providers.
+  1300→  * `src/lib/ai/image-manager.ts` — image facade (generate, getProvider, listAvailable,
+  1301→    listModels).
+  1302→
+  1303→- Created 6 image providers in `src/lib/ai/image-providers/`:
+  1304→  * `openai.ts` — DALL·E 3 + DALL·E 2 via the official `openai` SDK. Returns b64_json
+  1305→    (preferred) or url.
+  1306→  * `stability.ts` — SD3 (JSON) + SDXL (multipart form). Direct REST against
+  1307→    api.stability.ai.
+  1308→  * `replicate.ts` — FLUX.1 [dev] + [schnell]. Submits a prediction, polls the
+  1309→    `urls.get` endpoint with `Prefer: wait` + a 5-minute timeout.
+  1310→  * `fal.ts` — FLUX.1 [dev] + SDXL via the Fal.ai queue API. Submits, polls status_url,
+  1311→    fetches response_url.
+  1312→  * `ideogram.ts` — Ideogram v2 with aspect-ratio mapping (size → ASPECT_x_y).
+  1313→  * `google.ts` — Imagen 3 via `@google/generative-ai` SDK. Returns inlineData.b64.
+  1314→
+  1315→- Created the image service layer in `src/lib/image/`:
+  1316→  * `types.ts` — client-safe types (ImageGeneration, ImageModelRow, ImageStyle,
+  1317→    ImageUpload, ImageUsage, GenerateImageInput, ListImagesQuery, ImageUsageStats,
+  1318→    UploadImageInput, EditImageInput, etc.).
+  1319→  * `image-service.ts` — ImageService class with constructor `(supabase: AdminSupabaseClient
+  1320→    = createSupabaseAdminClient())` + `getImageService()` + `getImageServiceWith(supabase)`
+  1321→    factories + `isImageGenerationEnabled()` flag check. Methods: generate (creates
+  1322→    pending row → rate-limits → calls provider → uploads bytes to ai-assets bucket →
+  1323→    updates row with succeeded status + signed URL → records usage), getById, list,
+  1324→    delete, upload, enhance, upscale, removeBackground, recordUsage, getUsageStats.
+  1325→  * `catalog.ts` — `listImageModels()` (filters to configured providers),
+  1326→    `listImageStyles()`, `requireImageProviderConfigured()`.
+  1327→  * `history.ts` — `listImageHistory()` wrapper with `hasMore` pagination.
+  1328→  * `usage.ts` — `getImageUsage()` + `recordImageUsage()`.
+  1329→  * `upload.ts` — `uploadImage()` wrapper that converts Blob → ArrayBuffer.
+  1330→  * `client.ts` — client-safe barrel re-exporting ONLY types (no server-only modules).
+  1331→  * `index.ts` — server-only barrel re-exporting everything.
+  1332→
+  1333→- Created `src/lib/validation/image.ts`:
+  1334→  * `imageProviderSchema` (6 providers), `imageQualitySchema`, `generateImageSchema`
+  1335→    (provider, model, prompt required; everything else optional; strict),
+  1336→    `listImagesQuerySchema`, `uploadImageSchema` (multipart metadata, MIME allowlist,
+  1337→    50MB max), `editImageSchema` (generationId UUID, operation enum, optional prompt/
+  1338→    scale). All schemas strict + with inferred types.
+  1339→
+  1340→- Created 10 API routes in `src/app/api/images/`:
+  1341→  * `generate/route.ts` — POST generate image.
+  1342→  * `history/route.ts` — GET list with filters (status, provider, model, search,
+  1343→    limit, offset).
+  1344→  * `history/[id]/route.ts` — GET single + DELETE hard-delete.
+  1345→  * `models/route.ts` — GET catalog (filtered to configured providers).
+  1346→  * `styles/route.ts` — GET curated styles.
+  1347→  * `enhance/route.ts` — POST enhance (re-run with revised prompt).
+  1348→  * `upscale/route.ts` — POST upscale (1.5x larger size, hd quality).
+  1349→  * `remove-bg/route.ts` — POST remove background (routes through Replicate when
+  1350→    configured, falls back to prompt-prefix regeneration).
+  1351→  * `upload/route.ts` — POST multipart file upload to ai-assets bucket.
+  1352→  * `usage/route.ts` — GET aggregate usage stats with optional date range.
+  1353→  * All routes follow the thin pattern: `requireAuth() → validateInput() → service.X()
+  1354→    → apiSuccess/apiError`.
+  1355→
+  1356→- Created `src/hooks/use-images.ts`:
+  1357→  * `imageKeys` query-key factory.
+  1358→  * `useImageHistory`, `useImageDetail`, `useImageModels`, `useImageStyles`,
+  1359→    `useImageUsage` (queries).
+  1360→  * `useGenerateImage`, `useDeleteImage`, `useUploadImage` (mutations).
+  1361→  * `useEnhanceImage`, `useUpscaleImage`, `useRemoveImageBackground` (edit mutations).
+  1362→  * All invalidate the relevant query keys after a successful write.
+  1363→
+  1364→- Created UI components in `src/components/image/`:
+  1365→  * `model-picker.tsx` — shadcn Select grouped by provider (label + provider + model_id).
+  1366→  * `style-picker.tsx` — shadcn Select grouped by category.
+  1367→  * `image-studio.tsx` — prompt textarea, negative prompt, model picker, style picker,
+  1368→    size picker, quality picker, generate button, result preview. Uses
+  1369→    useGenerateImage mutation.
+  1370→  * `image-gallery.tsx` — responsive grid (2/3/4 cols) of past generations with a
+  1371→    click-to-view Dialog lightbox showing the full image + metadata + delete + edit
+  1372→    controls.
+  1373→  * `image-editor.tsx` — enhance / upscale / remove-bg action buttons.
+  1374→  * `image-view.tsx` — top-level container with Tabs (Generate, Gallery, Models, Usage).
+  1375→    Models tab shows provider-grouped catalog. Usage tab shows stat cards + per-provider
+  1376→    breakdown.
+  1377→  * `index.ts` — barrel.
+  1378→
+  1379→- Wired into dashboard:
+  1380→  * `src/components/dashboard/section-router.tsx` — added `import { ImageView }` +
+  1381→    `if (active === "image") return <ImageView />;` (placed after chat, before employees).
+  1382→  * `src/components/dashboard/nav-config.ts` — removed `comingSoon: true` from the image
+  1383→    nav item (the image section is now live).
+  1384→
+  1385→- Verification:
+  1386→  * `bun run typecheck` → 0 image-related errors. The 63 total tsc errors are ALL in
+  1387→    `src/lib/voice/`, `src/lib/workspace/`, `src/components/voice/`, and
+  1388→    `src/lib/ai/voice-providers/` — modules owned by other agents that were already
+  1389→    broken before this work began.
+  1390→  * `bun run lint` → 0 image-related errors. The 5 remaining lint errors are all in
+  1391→    `src/components/workspace/document-editor.tsx` (refs-during-render rule) and
+  1392→    `src/components/workspace/folder-tree.tsx` (aria-selected warning) — outside my
+  1393→    ownership area.
+  1394→
+  1395→Stage Summary:
+  1396→- Phase 4 AI Image Generation is fully rebuilt and integrated.
+  1397→- 1 SQL migration (5 new tables + RLS + indexes + triggers + seeds).
+  1398→- 4 AI image library modules (image-base, image-types, image-registry, image-manager).
+  1399→- 6 image providers (OpenAI DALL·E, Stability, Replicate, Fal, Ideogram, Google Imagen).
+  1400→- 8 image service library modules (types, image-service, catalog, history, usage,
+  1401→  upload, client, index).
+  1402→- 1 validation module (image.ts) with 6 Zod schemas.
+  1403→- 10 API routes under /api/images/ (generate, history, history/[id], models, styles,
+  1404→  enhance, upscale, remove-bg, upload, usage).
+  1405→- 1 TanStack Query hooks file (use-images.ts) with 8 hooks.
+  1406→- 6 UI components in src/components/image/ + barrel.
+  1407→- 2 dashboard files modified (section-router.tsx wired ImageView; nav-config.ts removed
+  1408→  comingSoon flag).
+  1409→- Production-ready: all server files start with `import "server-only"`, all API routes
+  1410→  use the thin pattern, all providers read API keys from process.env, RLS is
+  1411→  workspace-member-aware, storage uses the existing ai-assets bucket with namespaced
+
+[showing lines 1100-1411 of 1413; use offset=1412 with limit to continue reading]

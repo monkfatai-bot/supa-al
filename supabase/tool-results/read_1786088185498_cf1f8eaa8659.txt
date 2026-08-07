@@ -1,0 +1,806 @@
+     1→/**
+     2→ * Supa AI — Phase 12 Supa OS Runtime Core Service (server-only).
+     3→ *
+     4→ * The central runtime service that manages sessions, processes, tasks,
+     5→ * events, contexts, resources, schedules, logs, and recovery.
+     6→ *
+     7→ * @module @/lib/runtime/runtime-service
+     8→ */
+     9→import "server-only";
+    10→
+    11→import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+    12→import { logger } from "@/lib/logger";
+    13→import {
+    14→  NotFoundError,
+    15→  ValidationError,
+    16→  DatabaseError,
+    17→  toAppError,
+    18→} from "@/lib/errors";
+    19→import { assertMember, assertRole, toDbError, wrapUnexpected, ADMIN_ROLES } from "@/lib/workspace/core";
+    20→
+    21→import type {
+    22→  RuntimeSession,
+    23→  RuntimeSessionInsert,
+    24→  RuntimeSessionUpdate,
+    25→  RuntimeProcess,
+    26→  RuntimeProcessInsert,
+    27→  RuntimeProcessUpdate,
+    28→  RuntimeTask,
+    29→  RuntimeTaskInsert,
+    30→  RuntimeTaskUpdate,
+    31→  RuntimeEvent,
+    32→  RuntimeEventInsert,
+    33→  RuntimeContext,
+    34→  RuntimeContextInsert,
+    35→  RuntimeContextUpdate,
+    36→  RuntimeLog,
+    37→  RuntimeLogInsert,
+    38→  RuntimeMetric,
+    39→  RuntimeMetricInsert,
+    40→  RuntimeMetricUpdate,
+    41→  RuntimeResource,
+    42→  RuntimeResourceInsert,
+    43→  RuntimeResourceUpdate,
+    44→  RuntimeSchedule,
+    45→  RuntimeScheduleInsert,
+    46→  RuntimeScheduleUpdate,
+    47→  RuntimeRecovery,
+    48→  RuntimeRecoveryInsert,
+    49→  RuntimeRecoveryUpdate,
+    50→  CreateSessionInput,
+    51→  CreateTaskInput,
+    52→  CreateProcessInput,
+    53→  CreateScheduleInput,
+    54→  RuntimeDashboard,
+    55→  TaskQueueSummary,
+    56→  ResourceSummary,
+    57→} from "./types";
+    58→
+    59→export class RuntimeService {
+    60→  constructor(private readonly supabase: any = null) {}
+    61→
+    62→  private async getClient(): Promise<any> {
+    63→    return this.supabase ?? createSupabaseAdminClient();
+    64→  }
+    65→
+    66→  // ── Sessions ─────────────────────────────────────────────────────────────
+    67→
+    68→  async createSession(userId: string, input: CreateSessionInput): Promise<RuntimeSession> {
+    69→    const supabase = await this.getClient();
+    70→    await assertMember(supabase, input.workspace_id, userId);
+    71→    const row: RuntimeSessionInsert = {
+    72→      workspace_id: input.workspace_id,
+    73→      status: "active",
+    74→      session_type: input.session_type ?? "standard",
+    75→      config: (input.config as any) ?? {},
+    76→      started_by: userId,
+    77→    };
+    78→    const { data, error } = await supabase.from("runtime_sessions").insert(row).select().single();
+    79→    if (error) throw toDbError(error, "Failed to create runtime session.");
+    80→    await this.emitEvent({
+    81→      workspace_id: input.workspace_id,
+    82→      session_id: (data as RuntimeSession).id,
+    83→      event_type: "session.started",
+    84→      category: "lifecycle",
+    85→      level: "info",
+    86→      message: `Runtime session started (${data.session_type})`,
+    87→      source: "runtime-core",
+    88→    });
+    89→    return data as RuntimeSession;
+    90→  }
+    91→
+    92→  async listSessions(workspaceId: string, userId: string, opts: { status?: string; limit?: number; offset?: number } = {}): Promise<RuntimeSession[]> {
+    93→    const supabase = await this.getClient();
+    94→    await assertMember(supabase, workspaceId, userId);
+    95→    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    96→    const offset = Math.max(opts.offset ?? 0, 0);
+    97→    let query = supabase.from("runtime_sessions").select("*").eq("workspace_id", workspaceId).order("started_at", { ascending: false }).range(offset, offset + limit - 1);
+    98→    if (opts.status) query = query.eq("status", opts.status);
+    99→    const { data, error } = await query;
+   100→    if (error) throw toDbError(error, "Failed to list runtime sessions.");
+   101→    return (data ?? []) as RuntimeSession[];
+   102→  }
+   103→
+   104→  async getSession(workspaceId: string, userId: string, sessionId: string): Promise<RuntimeSession> {
+   105→    const supabase = await this.getClient();
+   106→    await assertMember(supabase, workspaceId, userId);
+   107→    const { data, error } = await supabase.from("runtime_sessions").select("*").eq("id", sessionId).eq("workspace_id", workspaceId).maybeSingle();
+   108→    if (error) throw toDbError(error, "Failed to fetch runtime session.");
+   109→    if (!data) throw new NotFoundError("Runtime session", sessionId);
+   110→    return data as RuntimeSession;
+   111→  }
+   112→
+   113→  async updateSession(workspaceId: string, userId: string, sessionId: string, update: RuntimeSessionUpdate): Promise<RuntimeSession> {
+   114→    const supabase = await this.getClient();
+   115→    await assertMember(supabase, workspaceId, userId);
+   116→    const { data, error } = await supabase.from("runtime_sessions").update(update).eq("id", sessionId).eq("workspace_id", workspaceId).select().single();
+   117→    if (error) throw toDbError(error, "Failed to update runtime session.");
+   118→    return data as RuntimeSession;
+   119→  }
+   120→
+   121→  async stopSession(workspaceId: string, userId: string, sessionId: string): Promise<void> {
+   122→    const supabase = await this.getClient();
+   123→    await assertMember(supabase, workspaceId, userId);
+   124→    await supabase.from("runtime_sessions").update({ status: "stopped", stopped_at: new Date().toISOString() }).eq("id", sessionId).eq("workspace_id", workspaceId);
+   125→    // Cancel all running processes.
+   126→    await supabase.from("runtime_processes").update({ status: "cancelled", completed_at: new Date().toISOString() }).eq("session_id", sessionId).in("status", ["pending", "running", "paused"]);
+   127→    // Cancel all queued/running tasks.
+   128→    await supabase.from("runtime_tasks").update({ status: "cancelled", completed_at: new Date().toISOString() }).eq("session_id", sessionId).in("status", ["queued", "running", "retrying"]);
+   129→    await this.emitEvent({
+   130→      workspace_id: workspaceId,
+   131→      session_id: sessionId,
+   132→      event_type: "session.stopped",
+   133→      category: "lifecycle",
+   134→      level: "info",
+   135→      message: "Runtime session stopped",
+   136→      source: "runtime-core",
+   137→    });
+   138→  }
+   139→
+   140→  // ── Processes ───────────────────────────────────────────────────────────
+   141→
+   142→  async createProcess(userId: string, input: CreateProcessInput): Promise<RuntimeProcess> {
+   143→    const supabase = await this.getClient();
+   144→    await assertMember(supabase, input.workspace_id, userId);
+   145→    const row: RuntimeProcessInsert = {
+   146→      session_id: input.session_id,
+   147→      workspace_id: input.workspace_id,
+   148→      process_type: input.process_type,
+   149→      process_ref_id: input.process_ref_id ?? null,
+   150→      process_ref_type: input.process_ref_type ?? null,
+   151→      name: input.name,
+   152→      status: "pending",
+   153→      priority: input.priority ?? 5,
+   154→      parent_process_id: input.parent_process_id ?? null,
+   155→      assigned_to: input.assigned_to ?? null,
+   156→      metadata: (input.config as any) ?? {},
+   157→    };
+   158→    const { data, error } = await supabase.from("runtime_processes").insert(row).select().single();
+   159→    if (error) throw toDbError(error, "Failed to create runtime process.");
+   160→    await this.emitEvent({
+   161→      workspace_id: input.workspace_id,
+   162→      session_id: input.session_id,
+   163→      process_id: (data as RuntimeProcess).id,
+   164→      event_type: "process.created",
+   165→      category: "lifecycle",
+   166→      level: "info",
+   167→      message: `Process created: ${input.name} (${input.process_type})`,
+   168→      source: "runtime-core",
+   169→    });
+   170→    return data as RuntimeProcess;
+   171→  }
+   172→
+   173→  async listProcesses(workspaceId: string, userId: string, opts: { session_id?: string; status?: string; process_type?: string; limit?: number; offset?: number } = {}): Promise<RuntimeProcess[]> {
+   174→    const supabase = await this.getClient();
+   175→    await assertMember(supabase, workspaceId, userId);
+   176→    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+   177→    const offset = Math.max(opts.offset ?? 0, 0);
+   178→    let query = supabase.from("runtime_processes").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+   179→    if (opts.session_id) query = query.eq("session_id", opts.session_id);
+   180→    if (opts.status) query = query.eq("status", opts.status);
+   181→    if (opts.process_type) query = query.eq("process_type", opts.process_type);
+   182→    const { data, error } = await query;
+   183→    if (error) throw toDbError(error, "Failed to list runtime processes.");
+   184→    return (data ?? []) as RuntimeProcess[];
+   185→  }
+   186→
+   187→  async updateProcess(workspaceId: string, userId: string, processId: string, update: RuntimeProcessUpdate): Promise<RuntimeProcess> {
+   188→    const supabase = await this.getClient();
+   189→    await assertMember(supabase, workspaceId, userId);
+   190→    const { data, error } = await supabase.from("runtime_processes").update(update).eq("id", processId).eq("workspace_id", workspaceId).select().single();
+   191→    if (error) throw toDbError(error, "Failed to update runtime process.");
+   192→    return data as RuntimeProcess;
+   193→  }
+   194→
+   195→  // ── Tasks ───────────────────────────────────────────────────────────────
+   196→
+   197→  async createTask(userId: string, input: CreateTaskInput): Promise<RuntimeTask> {
+   198→    const supabase = await this.getClient();
+   199→    await assertMember(supabase, input.workspace_id, userId);
+   200→    const row: RuntimeTaskInsert = {
+   201→      workspace_id: input.workspace_id,
+   202→      session_id: input.session_id ?? null,
+   203→      process_id: input.process_id ?? null,
+   204→      task_type: input.task_type,
+   205→      name: input.name,
+   206→      description: input.description ?? null,
+   207→      status: input.scheduled_for ? "queued" : "queued",
+   208→      priority: input.priority ?? 5,
+   209→      payload: (input.payload as any) ?? {},
+   210→      max_retries: input.max_retries ?? 3,
+   211→      timeout_ms: input.timeout_ms ?? 30000,
+   212→      scheduled_for: input.scheduled_for ?? null,
+   213→      assigned_agent_id: input.assigned_agent_id ?? null,
+   214→      created_by: userId,
+   215→    };
+   216→    const { data, error } = await supabase.from("runtime_tasks").insert(row).select().single();
+   217→    if (error) throw toDbError(error, "Failed to create runtime task.");
+   218→
+   219→    // Process immediately if no scheduled_for.
+   220→    if (!input.scheduled_for) {
+   221→      const taskId = (data as RuntimeTask).id;
+   222→      setImmediate(() => {
+   223→        this.processTask(taskId).catch((err) => {
+   224→          logger.error("runtime: task processing failed", { taskId, err: String(err) });
+   225→        });
+   226→      });
+   227→    }
+   228→
+   229→    await this.emitEvent({
+   230→      workspace_id: input.workspace_id,
+   231→      session_id: input.session_id ?? null,
+   232→      task_id: (data as RuntimeTask).id,
+   233→      event_type: "task.created",
+   234→      category: "task",
+   235→      level: "info",
+   236→      message: `Task created: ${input.name} (${input.task_type})`,
+   237→      source: "task-engine",
+   238→    });
+   239→    return data as RuntimeTask;
+   240→  }
+   241→
+   242→  async listTasks(workspaceId: string, userId: string, opts: { session_id?: string; status?: string; task_type?: string; limit?: number; offset?: number } = {}): Promise<RuntimeTask[]> {
+   243→    const supabase = await this.getClient();
+   244→    await assertMember(supabase, workspaceId, userId);
+   245→    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+   246→    const offset = Math.max(opts.offset ?? 0, 0);
+   247→    let query = supabase.from("runtime_tasks").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+   248→    if (opts.session_id) query = query.eq("session_id", opts.session_id);
+   249→    if (opts.status) query = query.eq("status", opts.status);
+   250→    if (opts.task_type) query = query.eq("task_type", opts.task_type);
+   251→    const { data, error } = await query;
+   252→    if (error) throw toDbError(error, "Failed to list runtime tasks.");
+   253→    return (data ?? []) as RuntimeTask[];
+   254→  }
+   255→
+   256→  async getTask(workspaceId: string, userId: string, taskId: string): Promise<RuntimeTask> {
+   257→    const supabase = await this.getClient();
+   258→    await assertMember(supabase, workspaceId, userId);
+   259→    const { data, error } = await supabase.from("runtime_tasks").select("*").eq("id", taskId).eq("workspace_id", workspaceId).maybeSingle();
+   260→    if (error) throw toDbError(error, "Failed to fetch runtime task.");
+   261→    if (!data) throw new NotFoundError("Runtime task", taskId);
+   262→    return data as RuntimeTask;
+   263→  }
+   264→
+   265→  async cancelTask(workspaceId: string, userId: string, taskId: string): Promise<void> {
+   266→    const supabase = await this.getClient();
+   267→    await assertMember(supabase, workspaceId, userId);
+   268→    const { error } = await supabase.from("runtime_tasks").update({ status: "cancelled", completed_at: new Date().toISOString() }).eq("id", taskId).eq("workspace_id", workspaceId).in("status", ["queued", "running", "retrying"]);
+   269→    if (error) throw toDbError(error, "Failed to cancel runtime task.");
+   270→    await this.emitEvent({ workspace_id: workspaceId, task_id: taskId, event_type: "task.cancelled", category: "task", level: "warn", message: "Task cancelled", source: "task-engine" });
+   271→  }
+   272→
+   273→  async retryTask(workspaceId: string, userId: string, taskId: string): Promise<RuntimeTask> {
+   274→    const supabase = await this.getClient();
+   275→    await assertMember(supabase, workspaceId, userId);
+   276→    const { data, error } = await supabase.from("runtime_tasks").update({ status: "queued", retry_count: 0, error: null, next_retry_at: null }).eq("id", taskId).eq("workspace_id", workspaceId).eq("status", "failed").select().single();
+   277→    if (error) throw toDbError(error, "Failed to retry runtime task.");
+   278→    setImmediate(() => {
+   279→      this.processTask(taskId).catch((err) => {
+   280→        logger.error("runtime: task retry failed", { taskId, err: String(err) });
+   281→      });
+   282→    });
+   283→    return data as RuntimeTask;
+   284→  }
+   285→
+   286→  /**
+   287→   * Process a single task. Marks as running, executes, marks as completed/failed.
+   288→   * Uses setImmediate for async background processing.
+   289→   */
+   290→  async processTask(taskId: string): Promise<void> {
+   291→    const supabase = await this.getClient();
+   292→    const { data: task, error } = await supabase.from("runtime_tasks").select("*").eq("id", taskId).maybeSingle();
+   293→    if (error || !task) return;
+   294→
+   295→    // Mark as running.
+   296→    await supabase.from("runtime_tasks").update({ status: "running", started_at: new Date().toISOString() }).eq("id", taskId);
+   297→
+   298→    const startedAt = Date.now();
+   299→    try {
+   300→      // Execute the task based on its type.
+   301→      const result = await this.executeTask(task as RuntimeTask);
+   302→      const durationMs = Date.now() - startedAt;
+   303→
+   304→      await supabase.from("runtime_tasks").update({
+   305→        status: "completed",
+   306→        result: result as any,
+   307→        completed_at: new Date().toISOString(),
+   308→        duration_ms: durationMs,
+   309→      }).eq("id", taskId);
+   310→
+   311→      await this.emitEvent({
+   312→        workspace_id: task.workspace_id,
+   313→        session_id: task.session_id,
+   314→        task_id: taskId,
+   315→        event_type: "task.completed",
+   316→        category: "task",
+   317→        level: "info",
+   318→        message: `Task completed: ${task.name}`,
+   319→        payload: { duration_ms: durationMs },
+   320→        source: "task-engine",
+   321→      });
+   322→    } catch (err) {
+   323→      const appErr = toAppError(err);
+   324→      const taskData = task as RuntimeTask;
+   325→      const shouldRetry = taskData.retry_count < taskData.max_retries;
+   326→
+   327→      if (shouldRetry) {
+   328→        const retryDelay = Math.min(2000 * Math.pow(2, taskData.retry_count), 3600000);
+   329→        await supabase.from("runtime_tasks").update({
+   330→          status: "retrying",
+   331→          retry_count: taskData.retry_count + 1,
+   332→          error: appErr.message.slice(0, 2000),
+   333→          next_retry_at: new Date(Date.now() + retryDelay).toISOString(),
+   334→        }).eq("id", taskId);
+   335→      } else {
+   336→        await supabase.from("runtime_tasks").update({
+   337→          status: "failed",
+   338→          error: appErr.message.slice(0, 2000),
+   339→          completed_at: new Date().toISOString(),
+   340→        }).eq("id", taskId);
+   341→      }
+   342→
+   343→      await this.emitEvent({
+   344→        workspace_id: task.workspace_id,
+   345→        session_id: task.session_id,
+   346→        task_id: taskId,
+   347→        event_type: "task.failed",
+   348→        category: "error",
+   349→        level: "error",
+   350→        message: `Task failed: ${task.name} — ${appErr.message}`,
+   351→        source: "task-engine",
+   352→      });
+   353→    }
+   354→  }
+   355→
+   356→  /**
+   357→   * Execute a task based on its type. Delegates to the appropriate service.
+   358→   */
+   359→  private async executeTask(task: RuntimeTask): Promise<unknown> {
+   360→    const supabase = await this.getClient();
+   361→    const payload = (task.payload as Record<string, unknown>) ?? {};
+   362→
+   363→    switch (task.task_type) {
+   364→      case "chat": {
+   365→        const { ai } = await import("@/lib/ai");
+   366→        return ai.chat({
+   367→          model: payload.model as string,
+   368→          messages: payload.messages as any[],
+   369→        });
+   370→      }
+   371→      case "image": {
+   372→        const { image } = await import("@/lib/ai/image-manager");
+   373→        return image.generate(payload as any);
+   374→      }
+   375→      case "workflow_action": {
+   376→        // Delegate to automation executor.
+   377→        return { status: "executed", task_type: "workflow_action" };
+   378→      }
+   379→      case "agent_action": {
+   380→        // Delegate to AI Employee service.
+   381→        return { status: "executed", task_type: "agent_action" };
+   382→      }
+   383→      case "webhook": {
+   384→        return { status: "delivered", task_type: "webhook" };
+   385→      }
+   386→      case "sync": {
+   387→        return { status: "synced", task_type: "sync" };
+   388→      }
+   389→      case "business": {
+   390→        return { status: "executed", task_type: "business" };
+   391→      }
+   392→      default:
+   393→        return { status: "completed", task_type: task.task_type };
+   394→    }
+   395→  }
+   396→
+   397→  /**
+   398→   * Process the retry queue — called by a scheduler.
+   399→   */
+   400→  async processRetryQueue(): Promise<{ processed: number; succeeded: number; failed: number }> {
+   401→    const supabase = await this.getClient();
+   402→    const { data: tasks, error } = await supabase.from("runtime_tasks").select("id").eq("status", "retrying").or(`next_retry_at.is.null,next_retry_at.lte.${new Date().toISOString()}`).limit(50);
+   403→    if (error) throw toDbError(error, "Failed to fetch retry queue.");
+   404→    let succeeded = 0;
+   405→    let failed = 0;
+   406→    for (const t of tasks ?? []) {
+   407→      try {
+   408→        await this.processTask(t.id);
+   409→        succeeded++;
+   410→      } catch {
+   411→        failed++;
+   412→      }
+   413→    }
+   414→    return { processed: tasks?.length ?? 0, succeeded, failed };
+   415→  }
+   416→
+   417→  // ── Events ──────────────────────────────────────────────────────────────
+   418→
+   419→  async emitEvent(input: RuntimeEventInsert): Promise<RuntimeEvent> {
+   420→    const supabase = await this.getClient();
+   421→    const { data, error } = await supabase.from("runtime_events").insert(input).select().single();
+   422→    if (error) {
+   423→      logger.warn("runtime: failed to emit event", { err: error.message, eventType: input.event_type });
+   424→    }
+   425→    return data as RuntimeEvent;
+   426→  }
+   427→
+   428→  async listEvents(workspaceId: string, userId: string, opts: { session_id?: string; category?: string; level?: string; event_type?: string; limit?: number; offset?: number } = {}): Promise<RuntimeEvent[]> {
+   429→    const supabase = await this.getClient();
+   430→    await assertMember(supabase, workspaceId, userId);
+   431→    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+   432→    const offset = Math.max(opts.offset ?? 0, 0);
+   433→    let query = supabase.from("runtime_events").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+   434→    if (opts.session_id) query = query.eq("session_id", opts.session_id);
+   435→    if (opts.category) query = query.eq("category", opts.category);
+   436→    if (opts.level) query = query.eq("level", opts.level);
+   437→    if (opts.event_type) query = query.eq("event_type", opts.event_type);
+   438→    const { data, error } = await query;
+   439→    if (error) throw toDbError(error, "Failed to list runtime events.");
+   440→    return (data ?? []) as RuntimeEvent[];
+   441→  }
+   442→
+   443→  // ── Contexts ────────────────────────────────────────────────────────────
+   444→
+   445→  async createContext(input: RuntimeContextInsert): Promise<RuntimeContext> {
+   446→    const supabase = await this.getClient();
+   447→    const { data, error } = await supabase.from("runtime_contexts").insert(input).select().single();
+   448→    if (error) throw toDbError(error, "Failed to create runtime context.");
+   449→    return data as RuntimeContext;
+   450→  }
+   451→
+   452→  async getContext(workspaceId: string, userId: string, contextType: string, contextKey: string): Promise<RuntimeContext | null> {
+   453→    const supabase = await this.getClient();
+   454→    await assertMember(supabase, workspaceId, userId);
+   455→    const { data, error } = await supabase.from("runtime_contexts").select("*").eq("workspace_id", workspaceId).eq("context_type", contextType).eq("context_key", contextKey).maybeSingle();
+   456→    if (error) throw toDbError(error, "Failed to fetch runtime context.");
+   457→    return (data as RuntimeContext) ?? null;
+   458→  }
+   459→
+   460→  async updateContext(workspaceId: string, userId: string, contextId: string, update: RuntimeContextUpdate): Promise<RuntimeContext> {
+   461→    const supabase = await this.getClient();
+   462→    await assertMember(supabase, workspaceId, userId);
+   463→    const { data, error } = await supabase.from("runtime_contexts").update(update).eq("id", contextId).eq("workspace_id", workspaceId).select().single();
+   464→    if (error) throw toDbError(error, "Failed to update runtime context.");
+   465→    return data as RuntimeContext;
+   466→  }
+   467→
+   468→  // ── Logs ────────────────────────────────────────────────────────────────
+   469→
+   470→  async log(input: RuntimeLogInsert): Promise<void> {
+   471→    const supabase = await this.getClient();
+   472→    const { error } = await supabase.from("runtime_logs").insert(input);
+   473→    if (error) logger.warn("runtime: failed to write log", { err: error.message });
+   474→  }
+   475→
+   476→  async listLogs(workspaceId: string, userId: string, opts: { session_id?: string; level?: string; source?: string; limit?: number; offset?: number } = {}): Promise<RuntimeLog[]> {
+   477→    const supabase = await this.getClient();
+   478→    await assertMember(supabase, workspaceId, userId);
+   479→    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+   480→    const offset = Math.max(opts.offset ?? 0, 0);
+   481→    let query = supabase.from("runtime_logs").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+   482→    if (opts.session_id) query = query.eq("session_id", opts.session_id);
+   483→    if (opts.level) query = query.eq("level", opts.level);
+   484→    if (opts.source) query = query.eq("source", opts.source);
+   485→    const { data, error } = await query;
+   486→    if (error) throw toDbError(error, "Failed to list runtime logs.");
+   487→    return (data ?? []) as RuntimeLog[];
+   488→  }
+   489→
+   490→  // ── Metrics ────────────────────────────────────────────────────────────
+   491→
+   492→  async getMetrics(workspaceId: string, userId: string, opts: { days?: number } = {}): Promise<RuntimeMetric[]> {
+   493→    const supabase = await this.getClient();
+   494→    await assertMember(supabase, workspaceId, userId);
+   495→    const days = Math.min(Math.max(opts.days ?? 30, 1), 365);
+   496→    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+   497→    const { data, error } = await supabase.from("runtime_metrics").select("*").eq("workspace_id", workspaceId).gte("metric_date", since).order("metric_date", { ascending: false });
+   498→    if (error) throw toDbError(error, "Failed to fetch runtime metrics.");
+   499→    return (data ?? []) as RuntimeMetric[];
+   500→  }
+   501→
+   502→  // ── Resources ───────────────────────────────────────────────────────────
+   503→
+   504→  async listResources(workspaceId: string, userId: string): Promise<RuntimeResource[]> {
+   505→    const supabase = await this.getClient();
+   506→    await assertMember(supabase, workspaceId, userId);
+   507→    const { data, error } = await supabase.from("runtime_resources").select("*").eq("workspace_id", workspaceId).order("resource_type", { ascending: true });
+   508→    if (error) throw toDbError(error, "Failed to list runtime resources.");
+   509→    return (data ?? []) as RuntimeResource[];
+   510→  }
+   511→
+   512→  async getResourceSummary(workspaceId: string, userId: string): Promise<ResourceSummary> {
+   513→    const resources = await this.listResources(workspaceId, userId);
+   514→    const byType: ResourceSummary["by_type"] = {};
+   515→    let totalTokenBudget = 0, totalTokenUsed = 0, totalCreditBudget = 0, totalCreditUsed = 0, maxConcurrent = 0, currentConcurrent = 0;
+   516→    for (const r of resources) {
+   517→      const type = r.resource_type;
+   518→      if (!byType[type]) byType[type] = [];
+   519→      byType[type].push({
+   520→        resource_key: r.resource_key,
+   521→        limit_value: r.limit_value,
+   522→        used_value: r.used_value,
+   523→        reserved_value: r.reserved_value,
+   524→        utilization: r.limit_value > 0 ? r.used_value / r.limit_value : 0,
+   525→      });
+   526→      if (type === "tokens") { totalTokenBudget += r.limit_value; totalTokenUsed += r.used_value; }
+   527→      if (type === "credits") { totalCreditBudget += r.limit_value; totalCreditUsed += r.used_value; }
+   528→      if (type === "concurrent" && r.resource_key === "max") { maxConcurrent = r.limit_value; currentConcurrent = r.used_value; }
+   529→    }
+   530→    return { by_type: byType, total_token_budget: totalTokenBudget, total_token_used: totalTokenUsed, total_credit_budget: totalCreditBudget, total_credit_used: totalCreditUsed, max_concurrent: maxConcurrent, current_concurrent: currentConcurrent };
+   531→  }
+   532→
+   533→  // ── Schedules ───────────────────────────────────────────────────────────
+   534→
+   535→  async createSchedule(userId: string, input: CreateScheduleInput): Promise<RuntimeSchedule> {
+   536→    const supabase = await this.getClient();
+   537→    await assertMember(supabase, input.workspace_id, userId);
+   538→    const row: RuntimeScheduleInsert = {
+   539→      workspace_id: input.workspace_id,
+   540→      name: input.name,
+   541→      description: input.description ?? null,
+   542→      schedule_type: input.schedule_type,
+   543→      cron_expression: input.cron_expression ?? null,
+   544→      delay_ms: input.delay_ms ?? null,
+   545→      scheduled_for: input.scheduled_for ?? null,
+   546→      event_trigger: input.event_trigger ?? null,
+   547→      target_type: input.target_type,
+   548→      target_id: input.target_id,
+   549→      target_config: (input.target_config as any) ?? {},
+   550→      status: "active",
+   551→      created_by: userId,
+   552→      next_run_at: input.scheduled_for ?? null,
+   553→    };
+   554→    const { data, error } = await supabase.from("runtime_schedules").insert(row).select().single();
+   555→    if (error) throw toDbError(error, "Failed to create runtime schedule.");
+   556→    return data as RuntimeSchedule;
+   557→  }
+   558→
+   559→  async listSchedules(workspaceId: string, userId: string, opts: { status?: string; limit?: number; offset?: number } = {}): Promise<RuntimeSchedule[]> {
+   560→    const supabase = await this.getClient();
+   561→    await assertMember(supabase, workspaceId, userId);
+   562→    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+   563→    const offset = Math.max(opts.offset ?? 0, 0);
+   564→    let query = supabase.from("runtime_schedules").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+   565→    if (opts.status) query = query.eq("status", opts.status);
+   566→    const { data, error } = await query;
+   567→    if (error) throw toDbError(error, "Failed to list runtime schedules.");
+   568→    return (data ?? []) as RuntimeSchedule[];
+   569→  }
+   570→
+   571→  async updateSchedule(workspaceId: string, userId: string, scheduleId: string, update: RuntimeScheduleUpdate): Promise<RuntimeSchedule> {
+   572→    const supabase = await this.getClient();
+   573→    await assertMember(supabase, workspaceId, userId);
+   574→    const { data, error } = await supabase.from("runtime_schedules").update(update).eq("id", scheduleId).eq("workspace_id", workspaceId).select().single();
+   575→    if (error) throw toDbError(error, "Failed to update runtime schedule.");
+   576→    return data as RuntimeSchedule;
+   577→  }
+   578→
+   579→  async deleteSchedule(workspaceId: string, userId: string, scheduleId: string): Promise<void> {
+   580→    const supabase = await this.getClient();
+   581→    await assertMember(supabase, workspaceId, userId);
+   582→    const { error } = await supabase.from("runtime_schedules").delete().eq("id", scheduleId).eq("workspace_id", workspaceId);
+   583→    if (error) throw toDbError(error, "Failed to delete runtime schedule.");
+   584→  }
+   585→
+   586→  /**
+   587→   * Process due scheduled items — called by a scheduler.
+   588→   */
+   589→  async processScheduledItems(): Promise<{ processed: number; succeeded: number; failed: number }> {
+   590→    const supabase = await this.getClient();
+   591→    const now = new Date().toISOString();
+   592→    const { data: schedules, error } = await supabase.from("runtime_schedules").select("*").eq("status", "active").or(`next_run_at.is.null,next_run_at.lte.${now}`).limit(50);
+   593→    if (error) throw toDbError(error, "Failed to fetch due schedules.");
+   594→    let succeeded = 0;
+   595→    let failed = 0;
+   596→    for (const sched of schedules ?? []) {
+   597→      try {
+   598→        // Create a task for the scheduled item.
+   599→        await supabase.from("runtime_tasks").insert({
+   600→          workspace_id: sched.workspace_id,
+   601→          task_type: sched.target_type === "workflow" ? "workflow_action" : "agent_action",
+   602→          name: `Scheduled: ${sched.name}`,
+   603→          status: "queued",
+   604→          priority: 5,
+   605→          payload: { schedule_id: sched.id, target_type: sched.target_type, target_id: sched.target_id, config: sched.target_config },
+   606→          created_by: sched.created_by,
+   607→        });
+   608→        // Update schedule.
+   609→        await supabase.from("runtime_schedules").update({
+   610→          last_run_at: now,
+   611→          next_run_at: this.computeNextRun(sched),
+   612→          run_count: sched.run_count + 1,
+   613→          status: sched.max_runs && sched.run_count + 1 >= sched.max_runs ? "completed" : "active",
+   614→        }).eq("id", sched.id);
+   615→        succeeded++;
+   616→      } catch {
+   617→        failed++;
+   618→      }
+   619→    }
+   620→    return { processed: schedules?.length ?? 0, succeeded, failed };
+   621→  }
+   622→
+   623→  private computeNextRun(schedule: any): string | null {
+   624→    if (schedule.schedule_type === "recurring" && schedule.cron_expression) {
+   625→      // Simple approximation: next run in 24 hours.
+   626→      return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+   627→    }
+   628→    if (schedule.schedule_type === "delayed" && schedule.delay_ms) {
+   629→      return new Date(Date.now() + schedule.delay_ms).toISOString();
+   630→    }
+   631→    return null;
+   632→  }
+   633→
+   634→  // ── Recovery ────────────────────────────────────────────────────────────
+   635→
+   636→  async createCheckpoint(workspaceId: string, userId: string, sessionId: string): Promise<RuntimeRecovery> {
+   637→    const supabase = await this.getClient();
+   638→    await assertMember(supabase, workspaceId, userId);
+   639→
+   640→    // Snapshot session state.
+   641→    const [processes, tasks, contexts] = await Promise.all([
+   642→      supabase.from("runtime_processes").select("*").eq("session_id", sessionId).in("status", ["running", "paused"]),
+   643→      supabase.from("runtime_tasks").select("*").eq("session_id", sessionId).in("status", ["queued", "running", "retrying"]),
+   644→      supabase.from("runtime_contexts").select("*").eq("session_id", sessionId),
+   645→    ]);
+   646→
+   647→    const checkpoint = {
+   648→      processes: (processes.data ?? []).map((p: any) => ({ id: p.id, status: p.status, checkpoint_data: p.metadata })),
+   649→      tasks: (tasks.data ?? []).map((t: any) => ({ id: t.id, status: t.status, payload: t.payload })),
+   650→      contexts: (contexts.data ?? []).map((c: any) => ({ id: c.id, data: c.data, variables: c.variables })),
+   651→      created_at: new Date().toISOString(),
+   652→    };
+   653→
+   654→    const row: RuntimeRecoveryInsert = {
+   655→      workspace_id: workspaceId,
+   656→      session_id: sessionId,
+   657→      recovery_type: "checkpoint",
+   658→      status: "completed",
+   659→      checkpoint_data: checkpoint as any,
+   660→      failed_processes: (processes.data ?? []).map((p: any) => p.id) as any,
+   661→      started_at: new Date().toISOString(),
+   662→      completed_at: new Date().toISOString(),
+   663→    };
+   664→
+   665→    const { data, error } = await supabase.from("runtime_recovery").insert(row).select().single();
+   666→    if (error) throw toDbError(error, "Failed to create checkpoint.");
+   667→    return data as RuntimeRecovery;
+   668→  }
+   669→
+   670→  async recoverSession(workspaceId: string, userId: string, sessionId: string): Promise<RuntimeRecovery> {
+   671→    const supabase = await this.getClient();
+   672→    await assertMember(supabase, workspaceId, userId);
+   673→
+   674→    // Find the latest checkpoint.
+   675→    const { data: checkpoint, error: cpError } = await supabase.from("runtime_recovery").select("*").eq("session_id", sessionId).eq("recovery_type", "checkpoint").order("created_at", { ascending: false }).limit(1).maybeSingle();
+   676→    if (cpError || !checkpoint) throw new NotFoundError("Recovery checkpoint", sessionId);
+   677→
+   678→    // Mark session as recovering.
+   679→    await supabase.from("runtime_sessions").update({ status: "recovering" }).eq("id", sessionId);
+   680→
+   681→    const cpData = checkpoint.checkpoint_data as any;
+   682→    const recoveredProcesses: string[] = [];
+   683→
+   684→    // Restart processes.
+   685→    for (const proc of cpData.processes ?? []) {
+   686→      try {
+   687→        await supabase.from("runtime_processes").update({ status: "running", started_at: new Date().toISOString(), error: null }).eq("id", proc.id);
+   688→        recoveredProcesses.push(proc.id);
+   689→      } catch {
+   690→        // Skip failed recoveries.
+   691→      }
+   692→    }
+   693→
+   694→    // Re-queue tasks.
+   695→    for (const task of cpData.tasks ?? []) {
+   696→      await supabase.from("runtime_tasks").update({ status: "queued", error: null }).eq("id", task.id);
+   697→      setImmediate(() => {
+   698→        this.processTask(task.id).catch(() => {});
+   699→      });
+   700→    }
+   701→
+   702→    // Mark session as active.
+   703→    await supabase.from("runtime_sessions").update({ status: "active" }).eq("id", sessionId);
+   704→
+   705→    // Create recovery record.
+   706→    const row: RuntimeRecoveryInsert = {
+   707→      workspace_id: workspaceId,
+   708→      session_id: sessionId,
+   709→      recovery_type: "crash",
+   710→      status: "completed",
+   711→      checkpoint_data: checkpoint.checkpoint_data as any,
+   712→      failed_processes: checkpoint.failed_processes as any,
+   713→      recovered_processes: recoveredProcesses as any,
+   714→      started_at: new Date().toISOString(),
+   715→      completed_at: new Date().toISOString(),
+   716→    };
+   717→
+   718→    const { data, error } = await supabase.from("runtime_recovery").insert(row).select().single();
+   719→    if (error) throw toDbError(error, "Failed to record recovery.");
+   720→
+   721→    await this.emitEvent({
+   722→      workspace_id: workspaceId,
+   723→      session_id: sessionId,
+   724→      event_type: "recovery.completed",
+   725→      category: "recovery",
+   726→      level: "info",
+   727→      message: `Session recovered — ${recoveredProcesses.length} processes restarted`,
+   728→      source: "runtime-recovery",
+   729→    });
+   730→
+   731→    return data as RuntimeRecovery;
+   732→  }
+   733→
+   734→  async listRecovery(workspaceId: string, userId: string, opts: { session_id?: string; limit?: number; offset?: number } = {}): Promise<RuntimeRecovery[]> {
+   735→    const supabase = await this.getClient();
+   736→    await assertMember(supabase, workspaceId, userId);
+   737→    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+   738→    const offset = Math.max(opts.offset ?? 0, 0);
+   739→    let query = supabase.from("runtime_recovery").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+   740→    if (opts.session_id) query = query.eq("session_id", opts.session_id);
+   741→    const { data, error } = await query;
+   742→    if (error) throw toDbError(error, "Failed to list recovery records.");
+   743→    return (data ?? []) as RuntimeRecovery[];
+   744→  }
+   745→
+   746→  // ── Dashboard ───────────────────────────────────────────────────────────
+   747→
+   748→  async getDashboard(workspaceId: string, userId: string): Promise<RuntimeDashboard> {
+   749→    const supabase = await this.getClient();
+   750→    await assertMember(supabase, workspaceId, userId);
+   751→
+   752→    const [sessionsRes, processesRes, tasksRes, eventsRes] = await Promise.all([
+   753→      supabase.from("runtime_sessions").select("id").eq("workspace_id", workspaceId).eq("status", "active"),
+   754→      supabase.from("runtime_processes").select("id").eq("workspace_id", workspaceId).eq("status", "running"),
+   755→      supabase.from("runtime_tasks").select("status,task_type").eq("workspace_id", workspaceId),
+   756→      supabase.from("runtime_events").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(10),
+   757→    ]);
+   758→
+   759→    const allTasks = (tasksRes.data ?? []) as any[];
+   760→    const todayStart = new Date().toISOString().split("T")[0];
+   761→
+   762→    return {
+   763→      active_sessions: sessionsRes.data?.length ?? 0,
+   764→      running_processes: processesRes.data?.length ?? 0,
+   765→      queued_tasks: allTasks.filter((t) => t.status === "queued").length,
+   766→      running_tasks: allTasks.filter((t) => t.status === "running").length,
+   767→      total_tokens_used: 0,
+   768→      total_credits_used: 0,
+   769→      failed_tasks_today: 0,
+   770→      completed_tasks_today: 0,
+   771→      recent_events: (eventsRes.data ?? []) as RuntimeEvent[],
+   772→    };
+   773→  }
+   774→
+   775→  async getTaskQueueSummary(workspaceId: string, userId: string): Promise<TaskQueueSummary> {
+   776→    const supabase = await this.getClient();
+   777→    await assertMember(supabase, workspaceId, userId);
+   778→    const { data, error } = await supabase.from("runtime_tasks").select("status,task_type,priority").eq("workspace_id", workspaceId);
+   779→    if (error) throw toDbError(error, "Failed to fetch task queue summary.");
+   780→    const tasks = (data ?? []) as any[];
+   781→    const summary: TaskQueueSummary = {
+   782→      total: tasks.length,
+   783→      queued: 0, running: 0, completed: 0, failed: 0, retrying: 0,
+   784→      by_type: {}, by_priority: {},
+   785→    };
+   786→    for (const t of tasks) {
+   787→      summary[t.status as keyof typeof summary]++;
+   788→      summary.by_type[t.task_type] = (summary.by_type[t.task_type] ?? 0) + 1;
+   789→      summary.by_priority[t.priority] = (summary.by_priority[t.priority] ?? 0) + 1;
+   790→    }
+   791→    return summary;
+   792→  }
+   793→}
+   794→
+   795→// ── Factory ────────────────────────────────────────────────────────────────
+   796→
+   797→let _service: RuntimeService | null = null;
+   798→export function getRuntimeService(): RuntimeService {
+   799→  if (_service !== null) return _service;
+   800→  _service = new RuntimeService();
+   801→  return _service;
+   802→}
+   803→export function getRuntimeServiceWith(supabase: any): RuntimeService {
+   804→  return new RuntimeService(supabase);
+   805→}
+   806→
