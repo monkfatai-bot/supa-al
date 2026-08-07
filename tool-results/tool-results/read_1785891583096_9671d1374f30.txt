@@ -1,0 +1,323 @@
+     1→# SUPA AI — Worklog
+     2→
+     3→This file is the shared work record for all agents working on Supa AI.
+     4→Each agent MUST append (never overwrite) a new section using the template:
+     5→
+     6→```markdown
+     7→---
+     8→Task ID: <task id, e.g. 2-a>
+     9→Agent: <agent name>
+    10→Task: <the task you were asked to do>
+    11→
+    12→Work Log:
+    13→- <concrete step 1>
+    14→- <concrete step 2>
+    15→
+    16→Stage Summary:
+    17→- <key results / decisions / artifacts>
+    18→```
+    19→
+    20→Before starting work, read the sections below to understand prior context.
+    21→
+    22→---
+    23→Task ID: 1
+    24→Agent: orchestrator (main)
+    25→Task: Phase 1 cleanup, dependency install, env architecture, folder skeleton
+    26→
+    27→Work Log:
+    28→- Explored existing scaffold (Next.js 16 + full shadcn/ui set).
+    29→- Removed `prisma/` directory and `src/lib/db.ts` (Prisma client).
+    30→- Stripped `@prisma/client`, `prisma` deps and `db:*` scripts from package.json.
+    31→- Verified no Prisma/SQLite references remain in source.
+    32→- Installed Supabase stack: `@supabase/supabase-js`, `@supabase/ssr`.
+    33→- Installed AI SDKs: `openai`, `@anthropic-ai/sdk`, `@google/generative-ai`.
+    34→- Installed billing: `stripe`, `@stripe/stripe-js`.
+    35→- Installed `ioredis` for caching/rate-limit abstraction.
+    36→- Authored `.env.example` (contract) and `.env` (local dev placeholders).
+    37→- Created enterprise folder skeleton under `src/lib/{config,supabase,auth,storage,ai,billing,rate-limit,feature-flags,logger,security,redis,errors,validation,utils,middleware,cache}`, `src/types`, `src/lib/constants`, `src/components/{layout,dashboard,providers,settings,shared,ui}`, `src/services`, `src/hooks`, `supabase/migrations`, `docs`, `scripts`.
+    38→
+    39→Stage Summary:
+    40→- Stack is now Next.js 16 + Supabase (no Prisma/SQLite).
+    41→- Foundation folders ready for parallel agent work.
+    42→- Next: dispatch Wave 1 agents (2-a core lib, 2-b supabase/auth/db, 2-c services/providers, 2-e docs), then Wave 2 (2-d UI/frontend).
+    43→
+    44→---
+    45→Task ID: 2-a
+    46→Agent: full-stack-developer (core lib)
+    47→Task: Build the cross-cutting foundation library for Supa AI — shared types, Zod validation, platform constants, generic utilities, in-memory caches, and CORS/security-header middleware. No Prisma, no SQLite, no mocks; everything fully typed, lint-clean, and built on top of the frozen `@/lib/config/env`, `@/lib/errors`, and `@/lib/logger` contracts.
+    48→
+    49→Work Log:
+    50→- Read prior worklog (Task 1, orchestrator) and the canonical `.env.example` contract.
+    51→- Inspected the frozen foundation files (`env.ts`, `errors/index.ts`, `logger/index.ts`, `utils.ts`) and the installed `zod@4.3.5` API to confirm available helpers (`z.brand`, `z.email`, `z.url`, `z.uuid`, `z.enum`, `$brand` symbol/type).
+    52→- Authored `src/types/common.ts`: branded `ID`/`UUID` (via zod's `$brand` symbol), `ISODateString`, `Timestamp`, `Maybe<T>`, `Result<T,E>` discriminated union, `AsyncResult<T>`, `PaginationParams`, `PaginatedResult<T>`, `SortDirection`.
+    53→- Authored `src/types/api.ts`: `HttpMethod`, `HTTP_STATUS` const + `HttpStatusCode`, `ApiMeta`, `ApiError`, `ApiResponse<T>` envelope (success/failure discriminated union), `ApiListResponse<T>`.
+    54→- Authored `src/types/auth.ts`: `AuthProvider`, `AuthRole` ('admin'|'member'|'owner'), `AuthUser`, `AuthSession`, `SignUpInput`, `SignInInput`.
+    55→- Authored `src/types/index.ts` barrel re-exporting common/api/auth.
+    56→- Authored `src/lib/validation/common.ts`: `uuidSchema` (branded), `idSchema` (`.brand<"ID">()`), `slugSchema`, `urlSchema`, `sortDirectionSchema`, `paginationSchema` (limit 1–100, default 20), `searchQuerySchema`. Re-exports the inferred `ID/UUID/PaginationParams/SortDirection` aliases so consumers stay in sync with the schemas.
+    57→- Authored `src/lib/validation/auth.ts`: `passwordSchema` (8–128 chars, upper/lower/digit), `emailSchema` (lowercased + trimmed), `signUpSchema` (literal `true` for `acceptTerms`), `signInSchema`, `passwordResetSchema`, `updatePasswordSchema` (with `confirmPassword` match refine). Exported inferred input types.
+    58→- Authored `src/lib/validation/index.ts` barrel + `validateInput<T>()` (throws `ValidationError` with `details.fields` array of `{path, message}`) and `safeValidate<T>()` (returns `Result<T, AppError>`).
+    59→- Authored `src/lib/constants/app.ts`: `APP_NAME`, `APP_DESCRIPTION`, `APP_VERSION='0.1.0'`, `DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `NavItem` interface, `APP_NAVIGATION` array (Chat / Image Generation / Marketplace / Business Tools / Pricing / Docs), `SocialLink` interface, `SOCIAL_LINKS`.
+    60→- Authored `src/lib/constants/ai.ts`: `AiProviderId`/`AiCapability` unions, `AiProviderInfo` interface, `AI_PROVIDERS` readonly catalog (openai, anthropic, google, openrouter, deepseek, qwen, grok), `DEFAULT_AI_PROVIDER`, `DEFAULT_AI_MODEL`, `AI_CAPABILITIES` matrix per provider, `providerSupports()` helper.
+    61→- Authored `src/lib/constants/billing.ts`: `PaymentProviderId`, `BillingInterval`, `SubscriptionStatus`, `PlanTierId` unions; `PAYMENT_PROVIDERS` (stripe/paystack/flutterwave with supported regions), `DEFAULT_PAYMENT_PROVIDER`, `DEFAULT_CURRENCY`, `BILLING_INTERVALS`, `SUBSCRIPTION_STATUS`, `PLAN_TIERS` (free/starter/pro/business/enterprise with monthly+yearly USD prices + features + `customPricing`/`highlighted` flags), `getPlanTier()` helper.
+    62→- Authored `src/lib/constants/security.ts`: `RateLimitConfig` interface, `RATE_LIMIT_PRESETS` (auth/api/ai/upload) via `satisfies Readonly<Record<string, RateLimitConfig>>`, `ALLOWED_UPLOAD_MIME_TYPES`, `MAX_UPLOAD_SIZE_BYTES` (10 MB), `CORS_DEFAULT_ORIGINS`, `SECURE_HEADERS` baseline.
+    63→- Authored `src/lib/constants/index.ts` barrel re-exporting app/ai/billing/security.
+    64→- Authored `src/lib/utils/index.ts`: re-exports existing `cn` from `@/lib/utils.ts` (NOT overwritten) and adds formatters (`formatDate`, `formatRelativeTime`, `formatCurrency`, `formatBytes`, `formatNumber`, `truncate`, `slugify`), collection helpers (`chunk`, `uniqueBy`, `groupBy`), object helpers (`omit`, `pick`), JSON/id/hash helpers (`safeJsonParse`, `generateId`, `hashString` djb2), and async helpers (`delay`/`sleep`, `retry` with exponential backoff + `shouldRetry` predicate).
+    65→- Authored `src/lib/cache/index.ts`: generic `MemoryCache<K,V>` class with `get/set/delete/clear/has/size`, per-entry TTL (`expiresAt=0` = never), eager eviction on read, and a coalesced background sweep scheduled via `setTimeout` on every `set()`. Uses `logger.debug` for sweep telemetry. Framework-agnostic.
+    66→- Authored `src/lib/cache/lru.ts`: bounded `LRUCache<K,V>` built on `Map` insertion order with O(1) `get/set/has/delete/clear/size`. `get()` refreshes recency via delete-then-set; `set()` evicts the LRU entry when at capacity.
+    67→- Authored `src/lib/middleware/cors.ts`: `corsHeaders(origin?)` returns a `HeadersInit` (resolves allowed origin from `{env.app.url}` allow-list, falls back to app URL otherwise); `applyCors(headers, origin?)` mutates a `Headers` in place.
+    68→- Authored `src/lib/middleware/security-headers.ts`: `composeCsp(appUrl)` builds a dynamic CSP (whelists self + app URL + Supabase + all 7 AI provider hosts), `securityHeaders(appUrl?)` returns the full header record (CSP, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy, HSTS, COOP, CORP), `applySecurityHeaders(headers, appUrl?)` mutates in place.
+    69→- Ran `bun run lint` — 0 errors, 0 warnings in my owned files (the 2 remaining warnings are in `src/lib/redis/*` which is outside my ownership).
+    70→- Ran `bun run typecheck` — 0 errors in my owned files; all reported errors are in other agents' areas (`src/lib/ai/providers/*`, `src/lib/supabase/*`, `src/lib/config/env.ts`, `examples/`, `skills/`).
+    71→
+    72→Stage Summary:
+    73→- Foundation library complete: 17 new files across `src/types/`, `src/lib/{validation,constants,utils,cache,middleware}/`.
+    74→- All exports strongly typed with no `any` — branded `ID`/`UUID` use zod's `$brand` symbol so `idSchema` infers directly to `ID`.
+    75→- `Result<T,E>` discriminated union powers the non-throwing `safeValidate()` helper; throwing `validateInput()` enriches `ValidationError.details.fields` with `{path, message}` per failing field.
+    76→- `ApiResponse<T>` envelope standardizes every API response (`{success:true,data,meta?} | {success:false,error:{code,message,details},meta?}`).
+    77→- In-memory caches (`MemoryCache`, `LRUCache`) are framework-agnostic and ready as the Redis-less fallback (Redis-backed cache is owned by another agent).
+    78→- CORS + security-headers middleware read from `env.app.url` / `env.supabase.url` so dev and prod share one source of truth.
+    79→- Did NOT modify any files outside the ownership area (env.ts, errors, logger, utils.ts, redis/, ai/, supabase/ all untouched).
+    80→
+    81→---
+    82→Task ID: 2-e
+    83→Agent: general-purpose (documentation)
+    84→Task: Write all 10 project documentation files for the Phase 1 foundation of Supa AI (README, PROJECT_ARCHITECTURE, PROJECT_SPECIFICATION, DATABASE_SCHEMA, API_SPECIFICATION, SECURITY, DEPLOYMENT, MASTER_ROADMAP, TASKS, CHANGELOG).
+    85→
+    86→Work Log:
+    87→- Read prior worklog (Task 1 orchestrator + Task 2-a core lib) and the canonical `.env.example` contract.
+    88→- Explored the codebase with Glob/LS/Read to verify what is actually built: confirmed committed foundation is `src/lib/{config/env.ts, config/index.ts, errors/index.ts, logger/index.ts, utils.ts}` + `src/components/ui/*` (full shadcn New York set) + `src/hooks/{use-mobile,use-toast}` + `src/app/{layout,page,globals.css,api/route}` + `package.json` + `tsconfig.json` + `next.config.ts` + `eslint.config.mjs` + `tailwind.config.ts` + `components.json`. Verified `supabase/migrations/` is empty (Task 2-b in progress) and no `Dockerfile` / `.github/workflows/` yet.
+    89→- Marked every "planned" item explicitly with 🚧/📋 and a "(planned)" annotation so docs are honest about what's built vs in-flight vs backlog.
+    90→- Authored `README.md` — overview, badges, tech stack, quickstart, scripts table, folder structure, docs index.
+    91→- Authored `PROJECT_ARCHITECTURE.md` (flagship) — layered architecture (Mermaid + ASCII), full module catalog with status, dependency graph / boot order, AI provider abstraction (registry+facade), billing provider abstraction, security/crypto layer, rate-limit system with presets + headers, in-memory fallback philosophy, error normalization flow, why-Supabase-over-Prisma/SQLite, storage layer, feature-flag system. Cites real file paths (`src/lib/config/env.ts`, `src/lib/errors/index.ts`, `src/lib/logger/index.ts`).
+    92→- Authored `PROJECT_SPECIFICATION.md` — product vision, 5 personas, 6-phase roadmap summary, NFRs (performance budgets, availability SLOs, security, scalability to 1M MAU), SOLID + secure-by-default + fully-typed design principles, conventions (naming, file placement, error handling, logging, git), Definition of Done, Phase 1 out-of-scope.
+    93→- Authored `DATABASE_SCHEMA.md` — 9 tables (users, organizations, organization_members, subscriptions, usage_records, api_keys, ai_conversations, ai_messages, files) with columns/types/constraints/indexes/RLS policies, 3 storage buckets (avatars, uploads, ai-assets) with RLS, triggers, migrations workflow, Mermaid erDiagram. Marked as intended contract per Task 2-b in-flight.
+    94→- Authored `API_SPECIFICATION.md` — URL conventions, `ApiResponse<T>` envelope, error response shape, auth model (Supabase session cookie + API keys), rate-limit headers (`X-RateLimit-Limit/Remaining/Reset`, `Retry-After`), CORS policy, Phase 1 endpoints (`/api/auth/callback`, `/api/auth/signout`, `/api/auth/me`, `/api/ai/chat`, `/api/ai/chat/stream`, `/api/billing/checkout`, `/api/billing/webhook/<provider>`, `/api/health`) with method/auth/body/response/errors, error matrix, request-ID propagation, versioning policy. Did NOT mention the sandbox-internal `XTransformPort` convention per instructions.
+    95→- Authored `SECURITY.md` — auth model (Supabase JWT + httpOnly cookie, 3 clients), RLS default-deny + 3 policy templates, secrets management (env validation, NEXT_PUBLIC boundary, server-only enforcement), AES-256-GCM field encryption, SHA-256+pepper API-key hashing (with rationale for fast hash over bcrypt), JWT signing, rate-limit strategy (per-IP + per-user, sliding window, fail-closed in prod), webhook signature verification (Stripe/Paystack/Flutterwave with constant-time compare), CSP + 8 security headers, Zod-at-every-boundary input validation, `internal` flag, OWASP Top 10 threat-model table, incident-response checklist.
+    96→- Authored `DEPLOYMENT.md` — local dev (bun install, .env.example copy, openssl secret generation, supabase db push, bun run dev), env matrix (dev/staging/prod), Supabase project setup (URL/keys, migrations, auth providers, 3 storage buckets), Redis provisioning (or in-memory fallback rules), Stripe/Paystack/Flutterwave setup, intended multi-stage `Dockerfile` (deps → builder → runner, non-root user, healthcheck), GitHub Actions CI pipeline (lint → typecheck → build → deploy), Vercel deploy, Render deploy, 6-section pre-deploy checklist, rollback strategy.
+    97→- Authored `MASTER_ROADMAP.md` — at-a-glance table + 6 phases each with goals/key modules/dependencies/scope. Phase 1 deliverables table with ✅/🚧/📋 status per item; Phases 2–6 marked 📋 planned.
+    98→- Authored `TASKS.md` — Phase 1 checklist grouped by sub-task (1.1 cleanup, 1.2 core lib ✅, 1.3 supabase/auth/db ⚠️, 1.4 services/providers ⚠️, 1.5 frontend ⚠️ planned, 1.6 docs ✅, 1.7 tooling), then Phase 2–6 backlog as `[ ]` checkboxes, plus recurring/cross-phase tasks.
+    99→- Authored `CHANGELOG.md` — Keep-a-Changelog format, `## [0.1.0] - 2026-08-04` "Phase 1: Foundation" with Added / Changed / Removed / Security sections. Removed section explicitly calls out "Prisma ORM and SQLite database — migrated to Supabase PostgreSQL." Added section enumerates the enterprise folder structure, env validation, Supabase clients, AI provider abstraction (7 providers), billing abstraction (3 providers), rate limiting, feature flags, security/crypto layer, structured logger, error hierarchy, dashboard shell, theme system. Includes an `[Unreleased]` section pointing at parallel in-flight work.
+   100→- All 10 docs are cross-linked with relative paths; each starts with a title + one-paragraph purpose statement per the quality bar.
+   101→
+   102→Stage Summary:
+   103→- 10 documentation files created in `/home/z/my-project/`: `README.md`, `PROJECT_ARCHITECTURE.md`, `PROJECT_SPECIFICATION.md`, `DATABASE_SCHEMA.md`, `API_SPECIFICATION.md`, `SECURITY.md`, `DEPLOYMENT.md`, `MASTER_ROADMAP.md`, `TASKS.md`, `CHANGELOG.md`.
+   104→- Docs accurately reflect what's committed (config, errors, logger, utils, shadcn set) vs what's in-flight (supabase clients, auth, storage, ai, billing, rate-limit, security, redis, validation, middleware, cache, constants, dashboard shell, migrations). Every in-flight item is explicitly marked 🚧/📋 and "(planned)".
+   105→- Used Mermaid diagrams where they add value: layered architecture flowchart + module dependency graph (PROJECT_ARCHITECTURE), ER diagram (DATABASE_SCHEMA).
+   106→- Flagship `PROJECT_ARCHITECTURE.md` cites real file paths (`src/lib/config/env.ts`, `src/lib/errors/index.ts`, `src/lib/logger/index.ts`) and documents the registry+facade pattern for both AI (7 providers) and billing (3 providers).
+   107→- Did NOT modify any source code. Did NOT touch files outside the 10 docs. Did NOT start the dev server.
+   108→
+   109→---
+   110→Task ID: 2-c
+   111→Agent: full-stack-developer (services/providers)
+   112→Task: Build the cross-cutting service layer for Supa AI Phase 1: Redis (with in-memory fallback), rate limiting, feature flags, security (crypto/JWT/API keys/sanitize), AI provider abstraction (7 providers + registry + facade), and billing (Stripe/Paystack/Flutterwave + plans + usage + facade).
+   113→
+   114→Work Log:
+   115→- Read existing worklog, env contract, errors module, logger module, and confirmed Phase 1 folder skeleton.
+   116→- Redis layer:
+   117→  * `src/lib/redis/memory-store.ts` — `KVStore` interface (`get`/`set`/`del`/`incr`) + in-memory `MemoryStore` impl with TTL sweep timer (60s) and FIFO eviction at 5k entries. Singleton via `globalThis.__supaMemoryStore`.
+   118→  * `src/lib/redis/redis-store.ts` — `RedisStore implements KVStore` over ioredis. `incr` uses INCR + EXPIRE-on-first-increment pattern for fixed-window counters. Errors wrapped to `ExternalServiceError`.
+   119→  * `src/lib/redis/index.ts` — barrel + `getRedis()` (lazy singleton via `globalThis.__supaRedisClient`), `isRedisAvailable()`, `getStore()` (Redis when configured, memory otherwise — cached once per process).
+   120→- Rate limiting:
+   121→  * `src/lib/rate-limit/presets.ts` — `AUTH`, `API`, `AI_GENERATION`, `UPLOAD`, `STRICT` presets.
+   122→  * `src/lib/rate-limit/index.ts` — `RateLimiter` class with `check` (non-throwing) and `consume` (throws `RateLimitError`) + `checkPreset`/`consumePreset`. Shared `rateLimiter` singleton. `rateLimit(opts)` higher-order API route wrapper that extracts IP (with `x-forwarded-for` / `x-real-ip` fallbacks) and attaches `X-RateLimit-*` headers. Fail-open when the store is unreachable.
+   123→- Feature flags:
+   124→  * `src/lib/feature-flags/index.ts` — `FeatureFlagService` with `isEnabledAsync` / `isEnabledSync` / `isEnabled`, override-aware (Redis/memory KV) with env defaults fallback. `setOverride`, `clearOverride`, `listFlags`. Six Phase 1 flags (`chat`, `image_generation`, `marketplace`, `business_tools`, `billing`, `new_onboarding`). `flagService` singleton.
+   125→  * `src/lib/feature-flags/hooks.ts` — `requireFeature` (async, throws `AuthorizationError` when disabled) and `requireFeatureSync`.
+   126→- Security:
+   127→  * `src/lib/security/crypto.ts` — AES-256-GCM `encrypt`/`decrypt` (output `iv:tag:ciphertext` hex), SHA-256 `hash`, constant-time `compareHash` and `constantTimeEqual`, `randomHex`.
+   128→  * `src/lib/security/jwt.ts` — HS256 `signJwt`/`verifyJwt<T>` with `iss`/`aud`/`iat`/`exp`/`jti`/`sub` claims. Throws `AuthenticationError` on any failure (bad sig, expired, wrong issuer/audience).
+   129→  * `src/lib/security/password.ts` — `generateApiKey` returns `{key, hash, prefix}` (peppered SHA-256 hash via `RATE_LIMIT_SECRET`; plaintext shown once), `hashApiKey`, `verifyApiKey` (constant-time), `keyPrefix`, `looksLikeApiKey`, `generateToken`.
+   130→  * `src/lib/security/sanitize.ts` — `sanitizeFilename`, `sanitizeHtml` (escape + strip script/style/iframe + on* handlers + javascript: URLs), `maskEmail`, `maskSecret`, `maskUrl`, `truncate`.
+   131→- AI provider abstraction:
+   132→  * `src/lib/ai/types.ts` — `ChatMessage`, `ChatRequest`, `ChatResponse`, `ChatStreamChunk`, `AIProvider`, `AIModel`, `TokenUsage`, `FinishReason`, `ToolCall`, `ToolDefinition`, `ResponseFormat`, `UsageRecord`, `UsageRecorder` (full provider-agnostic vocabulary).
+   133→  * `src/lib/ai/provider.ts` — `AIProviderClient` interface + `BaseAIProvider` abstract class with shared helpers (`normalizeError`, `emitUsage`, `resolveModel`, `computeCostCents`).
+   134→  * `src/lib/ai/providers/openai.ts` — `OpenAIProvider extends BaseAIProvider`. Lazy SDK init, streaming via `for await`, error normalization to `AIProviderError`, static model catalog (gpt-4o-mini, gpt-4o, gpt-4.1-mini, o4-mini). Tool calls, response_format (json_object / json_schema), stream_options.include_usage wired.
+   135→  * `src/lib/ai/providers/openrouter.ts`, `deepseek.ts`, `qwen.ts`, `grok.ts` — thin subclasses overriding `getConfig`/`catalog`/`defaultModel` to point at the right baseURL + apiKey.
+   136→  * `src/lib/ai/providers/anthropic.ts` — `AnthropicProvider` using `@anthropic-ai/sdk`. Splits system message to `system` param; maps tool_calls ↔ tool_use blocks; tool messages → user/tool_result blocks; streaming via `messages.stream()`.
+   137→  * `src/lib/ai/providers/google.ts` — `GoogleProvider` using `@google/generative-ai`. Maps system message → `systemInstruction`; user/assistant → `user`/`model` content roles; tool messages → `functionResponse` parts; tool_calls → `functionCall` parts. Streaming via `generateContentStream`.
+   138→  * `src/lib/ai/registry.ts` — `AIProviderRegistry` with lazy cached instances, `get(id)` throws `ConfigurationError` (names the missing env var), `getDefault()`, `listAvailable()`, `listAll()`. `aiRegistry` singleton.
+   139→  * `src/lib/ai/index.ts` — barrel + `ai` facade: `{ chat, chatStream, getProvider, listAvailable, listModels, setUsageRecorder }`. `chatStream` is a true `AsyncIterable` (no buffering); records usage from final-chunk metadata when available. Pluggable `UsageRecorder` callback.
+   140→- Billing:
+   141→  * `src/lib/billing/types.ts` — `PaymentProvider`, `Plan`, `Subscription`, `CheckoutSession`, `Customer`, `WebhookEvent`, `CheckoutInput`, `SubscriptionStatus`, `PlanTier`.
+   142→  * `src/lib/billing/provider.ts` — `BillingProvider` interface.
+   143→  * `src/lib/billing/providers/stripe.ts` — `StripeProvider` using official `stripe` SDK. Webhook signature verified via `client.webhooks.constructEvent` with `STRIPE_WEBHOOK_SECRET`.
+   144→  * `src/lib/billing/providers/paystack.ts` — `PaystackProvider` using typed `fetch` against `https://api.paystack.co`. Webhook signature = HMAC SHA512 of body, verified constant-time.
+   145→  * `src/lib/billing/providers/flutterwave.ts` — `FlutterwaveProvider` using typed `fetch` against `https://api.flutterwave.com/v3`. Webhook signature = raw secret in `verif-hash` header (Flutterwave v3 spec), constant-time compared.
+   146→  * `src/lib/billing/registry.ts` — `BillingProviderRegistry` mirror of AI registry pattern. `billingRegistry` singleton.
+   147→  * `src/lib/billing/plans.ts` — `PLANS` catalog (free, starter, pro, business, enterprise) with feature lists, monthly/yearly prices in USD cents, and per-plan `limits` (messagesPerMonth, imageGenerationsPerMonth, seats). `getPlan`, `findPlan`, `getDefaultPlan`, `compareTiers`.
+   148→  * `src/lib/billing/usage.ts` — `recordUsage` + `getUsage` with pluggable `UsageRecorder` callback. In-memory ring buffer (1000 entries) for dev visibility + Phase 1 fallback when no DB recorder is attached.
+   149→  * `src/lib/billing/index.ts` — barrel + `billing` facade: `{ createCheckout, cancel, getSubscription, getDefaultProvider, listAvailableProviders, handleWebhook, setWebhookHandler }`. `handleWebhook` verifies signature, then dispatches to a pluggable handler (set via `setWebhookHandler`).
+   150→- Quality verification:
+   151→  * `bun run lint` → clean (0 errors, 0 warnings).
+   152→  * `bun run typecheck` → 0 errors in owned modules (remaining errors are in `examples/`, `skills/`, `src/lib/config/env.ts`, `src/lib/storage/`, `src/lib/supabase/` — all owned by other agents).
+   153→
+   154→Stage Summary:
+   155→- All 30 required modules created (3 redis, 2 rate-limit, 2 feature-flags, 4 security, 11 ai, 8 billing).
+   156→- Every provider class is server-only by virtue of using Node APIs (ioredis, node:crypto, official SDKs) — they will fail to bundle for the client if imported from a client component, which is the desired defense.
+   157→- All upstream SDK clients are lazy-initialized (constructed on first use, cached) so a missing env var doesn't crash the process at boot — it only throws `ConfigurationError`/`PaymentError` when the relevant provider is actually requested.
+   158→- Errors normalized: SDK errors → `AIProviderError` (502), billing errors → `PaymentError` (402), missing config → `ConfigurationError` (500), feature-disabled → `AuthorizationError` (403), rate-limit → `RateLimitError` (429).
+   159→- Intentional fallbacks:
+   160→  * Redis disabled or unreachable → in-memory `MemoryStore` (logged loudly, not silent).
+   161→  * Rate-limiter store error → fail open (allowed=true) rather than denying service for a Redis blip.
+   162→  * Usage recorder throws → log + continue (never breaks a chat call).
+   163→  * Webhook handler throws → ack the provider anyway (avoid retry storms).
+   164→  * No DB usage recorder attached → buffer in-memory ring + log debug.
+   165→- Pluggable extension points wired for the DB/auth agent to attach later: `ai.setUsageRecorder(fn)`, `billing.setWebhookHandler(fn)`, `setUsageRecorder(fn)` from `@/lib/billing/usage`.
+   166→- Cross-module dependencies stay within ownership: redis is depended on by rate-limit + feature-flags (via `getStore()`); security/crypto is depended on by flutterwave (constant-time compare); logger + errors + env are imported from the pre-existing foundation.
+   167→
+   168→---
+   169→Task ID: 2-b
+   170→Agent: full-stack-developer (supabase/auth/db/storage)
+   171→Task: Build the Supabase foundation for Supa AI — three Supabase client factories (browser/server/admin), auth session + RBAC layer, three auth API routes, three SQL migrations (core schema, storage buckets, indexes), and a typed StorageService over Supabase Storage.
+   172→
+   173→Work Log:
+   174→- Read worklog (task 1 context) and inspected existing scaffolding: env config, error hierarchy, logger, constants/security (already exports `ALLOWED_UPLOAD_MIME_TYPES` + `MAX_UPLOAD_SIZE_BYTES`).
+   175→- Authored `src/lib/supabase/types.ts` — hand-written `Database` interface mirroring the SQL schema. Initially forgot `Relationships: []` on each table; supabase-js v2's `GenericTable` requires it (otherwise `Database["public"]` doesn't satisfy `GenericSchema`, breaking all typed queries). Added it to all 9 tables.
+   176→- Authored three client factories:
+   177→  - `client.ts` — `createBrowserClient` from `@supabase/ssr`; lazy `supabaseBrowser` singleton via `Proxy` (browser-only, throws on server access).
+   178→  - `server.ts` — `createServerClient` wired into `next/headers` `cookies()`; anon key (RLS enforced); `server-only` guard.
+   179→  - `admin.ts` — `createClient` with service role key + `{ persistSession:false, autoRefreshToken:false }`; singleton; JSDoc DANGER ZONE warning.
+   180→  - `index.ts` barrel.
+   181→- Auth layer: `session.ts` (`getSession` / `getCurrentUser` / `requireUserId`, errors mapped to `AuthenticationError`/`DatabaseError`); `permissions.ts` (4 roles × 16 permissions, frozen policy map; `can`/`hasPermission`/`isRole`); `index.ts` barrel exporting `AuthUser`, `AuthSession`, `Role`, `Permission`.
+   182→- Three auth API routes: `callback/route.ts` (code-for-session exchange + safe `next` redirect validation), `signout/route.ts` (POST, audit-logged), `me/route.ts` (GET, 401 on unauthenticated).
+   183→- Three SQL migrations:
+   184→  - `0001_init.sql` — 9 tables with RLS enabled; production-grade default-deny policies (org members read their org; owner/admin manage; self-join allowed when creating own owner membership); `handle_new_user()` SECURITY DEFINER trigger mirroring auth.users → public.users.
+   185→  - `0002_storage_buckets.sql` — `avatars` (public 2MB), `uploads` (private 25MB), `ai-assets` (private 50MB) with per-bucket RLS policies that extract ownership via `storage.foldername(name)[1]`.
+   186→  - `0003_indexes.sql` — perf indexes (provider IDs, usage rollups, api_keys hashed_key, files by owner/org) + reusable `set_updated_at()` trigger applied to all tables with `updated_at`.
+   187→- Storage service: `validation.ts` (`validateUpload` enforces global allowlist + per-bucket limits; `buildStoragePath` produces `{userId}/{yyyy}/{mm}/{uuid}/{sanitized}` so the storage RLS policies can authorize the owner); `index.ts` `StorageService` class with `upload`/`getSignedUrl`/`getPublicUrl`/`delete`/`list`, every Supabase error mapped to `StorageError`; `createStorage()` factory.
+   188→- Type engineering notes: `ServerSupabaseClient` / `AdminSupabaseClient` are `Awaited<ReturnType<typeof createXxxClient<Database>>>` (inferred) rather than explicit `SupabaseClient<Database, "public", Database["public"]>` because supabase-js v2's `SupabaseClient` has 5 generic params with non-trivial defaults — explicit args drift from the SDK's inferred return type.
+   189→- Ran `bun run lint` (exit 0, no errors in owned files) and `bun run typecheck` (exit 1, but all 5 remaining errors are in files outside my ownership area: `examples/websocket/*`, `skills/*`, `src/lib/config/env.ts`).
+   190→- Wrote per-agent work record at `agent-ctx/2-b-full-stack-developer.md`.
+   191→
+   192→Stage Summary:
+   193→- 16 files created (5 supabase, 3 auth, 3 API routes, 3 SQL migrations, 2 storage). All production-grade, fully typed, default-deny RLS, `server-only` guards on admin/server modules, audit logging on sign-in/out.
+   194→- Foundation is ready for downstream agents: AI/billing/services can `import { createSupabaseServerClient, createSupabaseAdminClient } from "@/lib/supabase"`; `import { requireUserId, can, hasPermission } from "@/lib/auth"`; `import { createStorage } from "@/lib/storage"`.
+   195→- Open items for other agents: (a) Next.js middleware that refreshes the Supabase session cookie (the `setAll` cookie handler no-ops in RSC); (b) frontend login page should handle `?auth_error=*` query params from the callback route; (c) the shared `src/types/auth.ts` (task spec said agent 2-a owns it) was not created — my barrel re-exports `AuthUser`/`AuthSession`/`Role` from `@/lib/auth` until that lands.
+   196→
+   197→---
+   198→Task ID: 2-d
+   199→Agent: full-stack-developer (UI/frontend)
+   200→Task: Build the UI/UX FOUNDATION of "Supa AI" — the Phase 1 dashboard shell, navigation, theme system, root providers, shared components, settings panel (6 sections), reusable hooks, Supabase session-refresh middleware, /api/health route, and the flagship `/` route rendering real foundation data (no mocks).
+   201→
+   202→Work Log:
+   203→- Read worklog.md (Tasks 1, 2-a, 2-b, 2-c, 2-e) and inspected the canonical lib contracts I must consume: `@/lib/config/env` (frozen `env`), `@/lib/errors`, `@/lib/logger`, `@/lib/constants/{app,ai,billing,security}`, `@/lib/ai` (facade with `listAvailable(): AIProvider[]` — note `AIProvider` is a string union, not an object), `@/lib/billing` (facade with `listAvailableProviders(): PaymentProvider[]` — also a string union), `@/lib/billing/plans` (`PLANS`), `@/lib/billing/types` (`Plan` interface), `@/lib/feature-flags` (`flagService.listFlags()`), `@/lib/auth/session` (`getSession()`), `@/lib/supabase/server`, `@/lib/security/sanitize` (`maskSecret`).
+   204→- Audited existing shadcn/ui New York set (52 components in `src/components/ui/`) — confirmed Button, Card, Sidebar, Sheet, DropdownMenu, Avatar, Tabs, Tooltip, Separator, Table, Command, Sonner Toaster, Badge, Collapsible, Switch, Label all exist and exported correctly. Did NOT touch any ui/ file.
+   205→- Theme system:
+   206→  * `src/components/providers/theme-provider.tsx` — `'use client'` wrapper around `next-themes` `ThemeProvider` (attribute="class", defaultTheme="system", enableSystem, disableTransitionOnChange). Exported as `ThemeProvider` + `ThemeProviderProps` type alias (not an empty interface — TS lint disallows empty-interface-extends-supertype).
+   207→  * Updated `src/app/globals.css` — kept the existing neutral oklch token system intact, added a refined emerald accent (`--brand` / `--brand-foreground` / `--brand-muted` oklch tokens for both light + dark), added `.scrollbar-thin` utility (8px rounded thumb using `--border`), `.bg-grid` + `.bg-grid-fade` utilities (subtle 32px grid with radial mask), and a base-layer `:focus-visible` ring rule for accessible keyboard navigation everywhere. Added `--color-brand` to the `@theme inline` block so Tailwind generates `text-brand` / `bg-brand` / `border-brand` utilities.
+   208→- Root providers:
+   209→  * `src/components/providers/query-provider.tsx` — `'use client'` TanStack Query `QueryClientProvider` with a stable `QueryClient` (via `useState`), defaults: staleTime 30s, retry 1, refetchOnWindowFocus false.
+   210→  * `src/components/providers/index.ts` — barrel.
+   211→  * Updated `src/app/layout.tsx` — wrapped children in `<ThemeProvider><QueryProvider><div className="min-h-screen flex flex-col bg-background">{children}<SonnerToaster/></div></QueryProvider></ThemeProvider>`. Swapped the old `Toaster` for `SonnerToaster` (richColors, closeButton, bottom-right). Updated metadata (title `Supa AI — Enterprise AI Platform`, description, keywords, OG, Twitter, applicationName from `APP_NAME`). Added a `viewport` export with themeColor + width. Kept the existing Geist + Geist_Mono fonts.
+   212→- Shared components (8 files in `src/components/shared/`):
+   213→  * `logo.tsx` — inline SVG brand mark: rounded square with emerald linear gradient + stylized "S" spark + spark accent dot. `useId()` for gradient id uniqueness. Optional `withWordmark` prop.
+   214→  * `page-header.tsx` — `{title, description?, icon?, actions?}` layout primitive. Responsive (stacks on mobile, inline on sm+).
+   215→  * `empty-state.tsx` — centered `{icon, title, description?, action?}` with dashed border + icon medallion.
+   216→  * `stat-card.tsx` — `{label, value, icon?, trend?, trendSuffix?, hint?}` metric tile with trend pill (green up / red down).
+   217→  * `status-badge.tsx` — `{status: 'ok'|'warning'|'error'|'disabled', label?}` badge with colored dot indicator (emerald / amber / red / muted).
+   218→  * `section-card.tsx` — `{title, description?, icon?, action?, children, footer?}` titled Card wrapper with header icon medallion + optional sticky footer slot.
+   219→  * `copy-button.tsx` — `'use client'` icon button that copies to clipboard with `sonner` toast feedback. Has Clipboard API + legacy `execCommand` fallback for non-secure contexts. Shows a green Check for 1.5s after copy.
+   220→  * `coming-soon.tsx` — small "Phase 2" badge with dashed border + uppercase tracking.
+   221→- Hooks (5 files in `src/hooks/`):
+   222→  * `use-media-query.ts` — SSR-safe generic `useMediaQuery(query)` (returns false on first render, resolves on client).
+   223→  * `use-copy-to-clipboard.ts` — `[copied, copy(text)]` with reset timeout (default 1500ms) + cleanup on unmount.
+   224→  * `use-keyboard-shortcut.ts` — registers a key combo `{key, meta?, shift?, alt?}` with options (`allowRepeat`, `ignoreFormFields`, `preventDefault`). Ref updated via `useEffect` (not during render — passes react-hooks/refs rule).
+   225→  * `use-user.ts` — TanStack Query hook hitting `/api/auth/me`. Returns `{user, isLoading, isAuthenticated, isFetching, refetch}`. Treats 401 as a valid "not signed in" response.
+   226→  * `use-feature-flags.ts` — accepts flags as a prop (server-fetched snapshot) and exposes `{flags, isEnabled(name)}`. Read-only in Phase 1.
+   227→- Dashboard navigation config (`src/components/dashboard/nav-config.ts`):
+   228→  * `SectionId` union (dashboard / chat / image / marketplace / business-tools / settings / billing / team).
+   229→  * `DashboardNavItem` / `DashboardNavGroup` interfaces.
+   230→  * `DASHBOARD_NAV` constant — 3 groups (Workspace / AI Tools / Account) with 8 items total. Active items: dashboard + settings. Coming-soon items (with badge): chat, image, marketplace, business-tools, billing, team. Lucide icons per item.
+   231→  * `SIDEBAR_FOOTER_LINKS` for the docs link.
+   232→- Dashboard shell + chrome (8 files in `src/components/dashboard/`):
+   233→  * `dashboard-shell.tsx` — `'use client'`. Root wrapper `flex min-h-screen flex-col`. Owns mobile sidebar open state + command-menu open state. Layout: sticky `<DashboardTopbar/>`, `<div flex flex-1>` containing sticky desktop `<aside>` + Sheet for mobile + `<main className="flex-1 bg-background scrollbar-thin">` + `<DashboardFooter/>` (mt-auto) + `<CommandMenu/>`. Body scrolls naturally (no internal main-scroll) so the footer is pushed down on long pages, per spec.
+   234→  * `dashboard-sidebar.tsx` — renders the grouped nav via shadcn `Collapsible`. Active item highlighted with `bg-muted` + `text-brand` icon. Each item is a `min-h-11` (44px) button for touch targets. Coming-soon items render disabled with `<ComingSoon/>` badge. Sidebar itself is `overflow-y-auto scrollbar-thin` so it scrolls internally if taller than viewport.
+   235→  * `dashboard-topbar.tsx` — sticky `top-0 z-30` header. Mobile menu trigger (Menu icon, `md:hidden`), logo + wordmark (clickable, returns to Overview), ⌘K command-palette trigger button (with kbd ⌘K hint), spacer, disabled notifications bell (tooltip "coming in Phase 2"), `<ThemeToggle/>`, `<UserMenu/>`.
+   236→  * `theme-toggle.tsx` — `'use client'` light/dark/system dropdown via next-themes. Mount guard (renders placeholder until mounted) to avoid SSR hydration mismatch.
+   237→  * `command-menu.tsx` — `'use client'` ⌘K palette via shadcn `CommandDialog` (cmdk). Lists nav sections (grouped) + theme actions + doc links. Disabled items show "Phase 2" suffix.
+   238→  * `user-menu.tsx` — `'use client'`. If `user` prop present: avatar dropdown (Settings / Profile / Sign out → POST `/api/auth/signout` + `router.refresh()`). If absent: disabled "Sign in" button with tooltip "Configure Supabase Auth to enable sign-in". Avatar fallback shows initials derived from user_metadata / email.
+   239→  * `dashboard-footer.tsx` — sticky footer (`mt-auto`). Shows © {year} Supa AI · `<StatusBadge>` env (Dev=warning, Staging/Production=ok) · v{APP_VERSION} · doc links (README, PROJECT_ARCHITECTURE, GitHub).
+   240→  * `foundation-data.ts` — serializable snapshot type (`FoundationData` + `AiProviderStatus`, `PaymentProviderStatus`, `SecretStatus`, `FoundationModule`). Documents the contract: every field is DOM-safe + browser-bundle-safe; no raw secrets — only "configured" booleans + masked previews.
+   241→- Settings panel + 6 sections (7 files in `src/components/settings/`):
+   242→  * `settings-panel.tsx` — `'use client'`. Tabs (General / Appearance / AI Providers / Billing / Security / Notifications) via shadcn `Tabs`. Responsive tab list (`overflow-x-auto scrollbar-thin` on mobile, `w-fit` on sm+). PageHeader at top.
+   243→  * `sections/general-section.tsx` — read-only table of app identity (name, URL, environment, version, default AI provider/model, default payment provider/currency) with copy buttons on long values.
+   244→  * `sections/appearance-section.tsx` — theme picker (3 cards: light/dark/system) wired to next-themes, mount-guarded. Density toggle + accent color picker are Phase-2 placeholders (disabled Switch + ComingSoon badge). Current accent locked to emerald.
+   245→  * `sections/ai-providers-section.tsx` — table of `AI_PROVIDERS` with StatusBadge per provider (configured if `env.ai.providers[id].apiKey` set), base URL with copy button, masked API key preview (`••••••••{last4}` — never the raw key). Default-provider badge.
+   246→  * `sections/billing-section.tsx` — payment-provider status table + full `PLANS` catalog as pricing cards (Free / Starter / Pro highlighted / Business / Enterprise). Prices formatted from USD cents. Limits row at bottom.
+   247→  * `sections/security-section.tsx` — masked secrets table (AUTH_SECRET, JWT_SECRET, ENCRYPTION_KEY — uses `maskSecret(value, 4)` showing first4 + last4 only, or "Missing"/"Not configured"), rate-limit presets table (auth/api/ai/upload with window + max), upload limits grid (max size formatted, allowed MIME types as chips).
+   248→  * `sections/notifications-section.tsx` — honest "No notification channels configured" EmptyState + disabled toggles for planned channels (Email / In-app / Webhook) with ComingSoon badge.
+   249→- Section router + overview (3 files):
+   250→  * `section-router.tsx` — `'use client'`. Owns active section state. Renders `<DashboardShell>` with the right content inside `<main>`: `<DashboardOverview>` for `dashboard`, `<SettingsPanel>` for `settings`, or a "coming soon" EmptyState for the other 6 sections.
+   251→  * `dashboard-overview.tsx` — server-presentational (no `'use client'`). Renders:
+   252→    - Hero row: app name + env StatusBadge + "Phase 1 · Foundation Ready" badge + build info card.
+   253→    - Stat cards (4-up responsive grid): AI providers configured, payment providers configured, feature flags enabled, plan tiers available.
+   254→    - "Foundation modules" grid: 11 module cards (Config / Errors / Logger / Supabase / AI / Billing / Rate Limiting / Feature Flags / Security / Storage / Redis) each with StatusBadge (Redis shows "warning" when not enabled) + description + file path.
+   255→    - "AI providers" table: full catalog with configured status + base URL + masked key preview + default badge.
+   256→    - Two-column row: "Feature flags" table (name + state + source) and "Billing plans" table (name + monthly + yearly + seats).
+   257→    - "What's next" callout: Phase 2 AI Chat teaser + link to /MASTER_ROADMAP.md.
+   258→  * `nav-config.ts` (covered above).
+   259→- Middleware + health route:
+   260→  * `src/middleware.ts` — Supabase session refresh middleware using `@supabase/ssr` `createServerClient`. Calls `supabase.auth.getUser()` to trigger cookie refresh. Wrapped in try/catch — never throws (passes through on error). Matcher excludes `_next/static`, `_next/image`, `favicon.ico`, and image files.
+   261→  * `src/app/api/health/route.ts` — GET returns `{status:"ok", timestamp, environment, version, services:{supabase, redis, aiProviders:n, paymentProviders:n}}` with real data from `env` + `ai.listAvailable()` + `billing.listAvailableProviders()`. `Cache-Control: no-store`. `dynamic = "force-dynamic"`.
+   262→- Flagship `/` route (`src/app/page.tsx`):
+   263→  * Async Server Component. `dynamic = "force-dynamic"`.
+   264→  * Calls `getSession()` — gracefully handles `null` (renders logged-out shell). Wrapped in try/catch so a Supabase blip never breaks the page (logs warning, falls back to logged-out).
+   265→  * Calls `ai.listAvailable()`, `billing.listAvailableProviders()`, `flagService.listFlags()`. Reads `env`, `PLANS`, `AI_PROVIDERS`, `PAYMENT_PROVIDERS`, `RATE_LIMIT_PRESETS`, `ALLOWED_UPLOAD_MIME_TYPES`, `MAX_UPLOAD_SIZE_BYTES`, `APP_NAME`, `APP_VERSION`.
+   266→  * Assembles a `FoundationData` snapshot via helpers: `buildAiProviders()` (uses `Set<string>(available)` since `AIProvider` is a string union — the original `available.map(p => p.id)` failed tsc because `p` is the string itself), `buildPaymentProviders()` (same pattern), `buildSecret()` (uses `maskSecret(value, 4)` for first4+last4).
+   267→  * Defines `FOUNDATION_MODULES` constant with 11 module rows (each with id, name, description, file path, status).
+   268→  * Renders `<SectionRouter user={user} data={data} />`.
+   269→- Lint / typecheck iteration:
+   270→  * First lint run flagged 3 errors: empty-interface-extends-supertype in theme-provider (fixed by switching to `type` alias), react-hooks/refs violations in use-feature-flags + use-keyboard-shortcut (fixed by moving ref updates into `useEffect`).
+   271→  * First tsc run flagged 5 errors: `Metadata` doesn't accept `version` (removed), `AIProvider`/`PaymentProvider` are string unions not objects (changed `available.map(p => p.id)` to `new Set<string>(available)`), `Plan` not exported from `@/lib/billing/plans` (re-imported from `@/lib/billing/types`), `readonly DASHBOARD_NAV[number]["items"]` invalid type syntax (replaced with `ReadonlyArray<DashboardNavItem>`).
+   272→  * After fixes: `bun run lint` exit 0, `bunx tsc --noEmit` exit 0.
+   273→
+   274→Stage Summary:
+   275→- 35 new files created + 2 modified (layout.tsx, globals.css) + 1 replaced (page.tsx). All in `src/components/{providers,shared,dashboard,settings,settings/sections}/`, `src/hooks/`, `src/middleware.ts`, `src/app/{page.tsx,api/health/route.ts}`.
+   276→- The `/` page renders a polished, enterprise-grade dashboard (Linear/Vercel/Notion quality) — every metric, status, and table cell is sourced from REAL lib calls. No mock data anywhere. Unconfigured capabilities (e.g. no AI keys set) surface honestly as "Not configured" StatusBadges, never as fabricated values.
+   277→- Mobile-first responsive at every breakpoint: stat cards go 1→2→4 columns, settings tabs scroll horizontally on mobile, sidebar collapses to a Sheet on `< md`, topbar shows the menu trigger + hides the wordmark on small screens.
+   278→- Sticky footer: root wrapper `min-h-screen flex flex-col`, body scrolls naturally (no internal main-scroll), `<footer className="mt-auto">`. On short pages the footer sits at the viewport bottom; on long pages it's pushed down by content. Sidebar is `sticky top-14 h-[calc(100vh-3.5rem)]` so it stays visible while the main scrolls.
+   279→- Accessibility: semantic `<header>/<nav>/<main>/<footer>` elements, aria-labels on every icon button, sr-only text where needed (Sheet title, kbd hint), focus-visible rings globally via `globals.css`, 44px min touch targets on all interactive nav items, keyboard-navigable Command palette (cmdk handles focus trap + Escape).
+   280→- Strict TypeScript throughout, no `any`. `bun run lint` → 0 errors. `bunx tsc --noEmit` → 0 errors.
+   281→- Did NOT touch lib/ files, existing ui/ components, or package.json. Did NOT start the dev server (orchestrator's responsibility).
+   282→- Foundation for Phase 2 is ready: the dashboard shell + section router can host the AI Chat surface (section id `chat`) by swapping the "coming soon" placeholder for a real `<ChatView>` component without touching the shell, navigation, or theme system.
+   283→
+   284→---
+   285→Task ID: 6
+   286→Agent: orchestrator (integration + verification)
+   287→Task: Wire the `/` route, fix cross-cutting integration bugs, end-to-end browser verification
+   288→
+   289→Work Log:
+   290→- Fixed `src/lib/config/env.ts`: removed invalid `as const` applied to `Object.freeze(...)` return (TS1355); `Env` type now derived from the frozen object.
+   291→- Excluded pre-existing `examples/`, `skills/`, `download/`, `tests/` folders from `tsconfig.json` (they reference uninstalled `socket.io` and unrelated skill code).
+   292→- Made `src/lib/logger/index.ts` Edge-runtime-safe: replaced `process.stdout`/`process.stderr` (Node-only) with `console.log`/`console.warn`/`console.error` (work in both Node + Edge). The middleware imports the logger transitively, so this was required for the Edge middleware to compile.
+   293→- Fixed `src/components/dashboard/dashboard-footer.tsx`: it was a `'use client'` component importing the server-only `env` module (which runs Zod validation on `process.env` at module load → `ConfigurationError` in the browser because non-public vars are undefined). Threaded `environment` as a prop from the server `page.tsx` → `SectionRouter` → `DashboardShell` → `DashboardFooter` instead. The `FoundationData` snapshot already carried `environment`, so no new data plumbing was needed.
+   294→- Updated `next.config.ts`: removed `typescript.ignoreBuildErrors` (we're now type-clean), added `allowedDevOrigans: ["*.space-z.ai", "*.z.ai"]` so the sandbox preview panel can access HMR/dev assets without cross-origin warnings.
+   295→- Verified no other client component imports server-only lib modules by value (only `import type` — safe, erased at compile).
+   296→- Restarted dev server (next.config change requires restart).
+   297→- Agent Browser end-to-end verification: page renders HTTP 200 with zero client errors; dashboard shell (sidebar + topbar + sticky footer) renders; real foundation data (7 AI providers, payment providers, feature flags, plans, security status — all honestly "Not configured" since no API keys set); Settings panel with 6 tabs (General/Appearance/AI Providers/Billing/Security/Notifications) all rendering real masked config; theme toggle (light/dark/system) works; command palette (⌘K) opens; mobile responsive (375px → hamburger Sheet sidebar); sticky footer present after scroll; `/api/health` returns real status JSON.
+   298→- Final `bun run lint` → 0 errors. Final `bunx tsc --noEmit` → 0 errors.
+   299→
+   300→Stage Summary:
+   301→- Phase 1 foundation is fully wired and browser-verified.
+   302→- The `/` route renders a production-quality dashboard that introspects the REAL foundation (no mock data).
+   303→- All cross-cutting integration issues resolved: env validation, Edge-runtime logger, client/server boundary for secrets, dev-origin config.
+   304→- Dev server running cleanly on port 3000; only log WARN is the documented Redis in-memory fallback.
+   305→
+   306→---
+   307→Task ID: 7
+   308→Agent: orchestrator (Phase 2 contract)
+   309→Task: Write the Phase 2 shared contract — DB migration, expanded Supabase types, expanded RBAC (6 platform roles)
+   310→
+   311→Work Log:
+   312→- Wrote `supabase/migrations/0004_phase2_auth.sql` — 7 new tables: `profiles` (rich user profile, 1:1 with auth.users), `user_settings` (preferences, notifications, privacy, 2FA, session timeout), `user_sessions` (multi-device tracking with UA/IP/device/geo), `notifications` (typed user notifications), `activity_logs` (audit trail for auth events), `account_deletion_requests` (GDPR data export + deletion), `linked_accounts` (OAuth provider connections). All with default-deny RLS, proper indexes, FK constraints, and the `handle_new_user()` trigger updated to provision profile + settings + linked_account rows on signup. Added `platform_role` column to `users` with 6-role check constraint.
+   313→- Updated `src/lib/supabase/types.ts` — added `platform_role` to `users` table types + full Row/Insert/Update types for all 7 new tables (profiles, user_settings, user_sessions, notifications, activity_logs, account_deletion_requests, linked_accounts).
+   314→- Expanded `src/lib/auth/permissions.ts` — added `PlatformRole` type (super_admin, admin, team_owner, team_member, premium_user, free_user), `PLATFORM_ROLE_PERMISSIONS` map, `canPlatform()`, `isPlatformRole()`, `PLATFORM_ROLE_LABELS`, and expanded `Permission` union with Phase 2 perms (ai:video/voice/business/marketing, admin:*, account:*). Updated `hasPermission()` to check platform role first, then org role. Updated `PermissionActor` to include `platformRole`.
+   315→- Updated `src/lib/auth/index.ts` barrel to export all new RBAC symbols.
+   316→- Verified: `bunx tsc --noEmit` → 0 errors.
+   317→
+   318→Stage Summary:
+   319→- Phase 2 DB + type + RBAC contract is ready for parallel agent work.
+   320→- Table contract: profiles (rich profile), user_settings (prefs), user_sessions (devices), notifications (in-app), activity_logs (audit), account_deletion_requests (GDPR), linked_accounts (OAuth).
+   321→- RBAC: 6 platform roles × 28 permissions, frozen policy map, `canPlatform()` + `hasPermission()` helpers.
+   322→- Next: dispatch Wave 1 agents (7-a data services, 7-b auth service + API routes) in parallel.
+   323→

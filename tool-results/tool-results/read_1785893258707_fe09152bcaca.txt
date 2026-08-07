@@ -1,0 +1,1049 @@
+     1→/**
+     2→ * Supa AI — AuthService.
+     3→ *
+     4→ * Orchestrates Supabase Auth with the Phase 2 data-access services
+     5→ * (profile, sessions, notifications, activity, account, linked-accounts).
+     6→ * Every method is server-only.
+     7→ *
+     8→ * Responsibilities:
+     9→ *   - Email/password sign-up + sign-in (with brute-force protection).
+    10→ *   - Password reset, password change, email change, email verification.
+    11→ *   - OAuth sign-in (PKCE) + callback handling.
+    12→ *   - Sign-out, account deletion, GDPR data export.
+    13→ *
+    14→ * Every auth-state-changing operation writes an `activity_logs` row via the
+    15→ * activity service (which uses the admin client so the insert bypasses RLS —
+    16→ * see migration 0004). Secrets are NEVER logged; structured metadata is
+    17→ * sanitized through `sanitizeMetadata` first.
+    18→ *
+    19→ * @module @/lib/auth/auth-service
+    20→ */
+    21→import "server-only";
+    22→
+    23→import { cookies } from "next/headers";
+    24→import { createServerClient } from "@supabase/ssr";
+    25→import type { Provider } from "@supabase/supabase-js";
+    26→
+    27→import { env } from "@/lib/config/env";
+    28→import {
+    29→  AuthenticationError,
+    30→  ConflictError,
+    31→  DatabaseError,
+    32→  ExternalServiceError,
+    33→  RateLimitError,
+    34→  ValidationError,
+    35→} from "@/lib/errors";
+    36→import { logger } from "@/lib/logger";
+    37→import type { Database } from "@/lib/supabase/types";
+    38→import {
+    39→  createSupabaseServerClient,
+    40→  type ServerSupabaseClient,
+    41→} from "@/lib/supabase/server";
+    42→
+    43→import type { AuthUser } from "@/lib/auth/session";
+    44→import { getSession } from "@/lib/auth/session";
+    45→import {
+    46→  checkBruteForce,
+    47→  recordFailedAttempt,
+    48→  clearAttempts,
+    49→} from "@/lib/auth/brute-force";
+    50→
+    51→import {
+    52→  createProfileService,
+    53→  type ProfileService,
+    54→} from "@/lib/auth/profile";
+    55→import {
+    56→  createSessionService,
+    57→  type SessionService,
+    58→} from "@/lib/auth/sessions";
+    59→import {
+    60→  createNotificationService,
+    61→  type NotificationService,
+    62→} from "@/lib/auth/notifications";
+    63→import {
+    64→  createActivityLogService,
+    65→  type ActivityLogService,
+    66→  type ActivityEventType,
+    67→  type ActivitySeverity,
+    68→} from "@/lib/auth/activity";
+    69→import {
+    70→  createAccountService,
+    71→  type AccountService,
+    72→} from "@/lib/auth/account";
+    73→import {
+    74→  createLinkedAccountsService,
+    75→  type LinkedAccountsService,
+    76→} from "@/lib/auth/linked-accounts";
+    77→import {
+    78→  parseUserAgent,
+    79→  getClientIp,
+    80→  sanitizeMetadata,
+    81→} from "@/lib/auth/helpers";
+    82→
+    83→// ---------------------------------------------------------------------------
+    84→// Types — public input/output contracts
+    85→// ---------------------------------------------------------------------------
+    86→
+    87→export interface SignUpInput {
+    88→  email: string;
+    89→  password: string;
+    90→  displayName?: string;
+    91→}
+    92→
+    93→export interface SignInInput {
+    94→  email: string;
+    95→  password: string;
+    96→  rememberMe?: boolean;
+    97→}
+    98→
+    99→export interface SignUpResult {
+   100→  user: AuthUser;
+   101→  needsEmailVerification: boolean;
+   102→}
+   103→
+   104→export interface SignInResult {
+   105→  user: AuthUser;
+   106→}
+   107→
+   108→export interface OAuthCallbackResult {
+   109→  user: AuthUser;
+   110→}
+   111→
+   112→export interface DownloadDataResult {
+   113→  downloadUrl: string;
+   114→  expiresAt: string;
+   115→}
+   116→
+   117→export type OAuthProviderId = "google" | "github" | "microsoft" | "apple";
+   118→
+   119→// ---------------------------------------------------------------------------
+   120→// Supabase error → AppError mapping
+   121→// ---------------------------------------------------------------------------
+   122→
+   123→/**
+   124→ * Translate a Supabase auth error into the appropriate {@link AppError}.
+   125→ *
+   126→ * Heuristics (Supabase error names are stable enough to branch on):
+   127→ *   - `AuthApiError` with status 400 + "already registered" → ConflictError (409).
+   128→ *   - `AuthApiError` with status 400 + "Invalid credentials" → AuthenticationError (401),
+   129→ *     with a GENERIC message that never reveals which of email/password is wrong.
+   130→ *   - `AuthApiError` with status 422 + "Password" → ValidationError.
+   131→ *   - `WeakPasswordError` → ValidationError.
+   132→ *   - `AuthRetryableError` → ExternalServiceError (502).
+   133→ *   - Anything else → AuthenticationError (safe default) with internal=true
+   134→ *     so the raw message is hidden.
+   135→ */
+   136→function mapSupabaseAuthError(err: {
+   137→  name: string;
+   138→  message: string;
+   139→  status?: number;
+   140→}): Error {
+   141→  const msg = err.message ?? "";
+   142→  const lower = msg.toLowerCase();
+   143→
+   144→  // Already-registered / duplicate email.
+   145→  if (
+   146→    err.status === 400 &&
+   147→    (lower.includes("already registered") ||
+   148→      lower.includes("user already registered") ||
+   149→      lower.includes("already been registered"))
+   150→  ) {
+   151→    return new ConflictError("An account with this email already exists.");
+   152→  }
+   153→
+   154→  // Weak / invalid password.
+   155→  if (
+   156→    err.name === "WeakPasswordError" ||
+   157→    lower.includes("password should be at least") ||
+   158→    lower.includes("password is too weak")
+   159→  ) {
+   160→    return new ValidationError("Password is too weak. Use 8+ chars with upper, lower, and a digit.");
+   161→  }
+   162→
+   163→  // Invalid credentials → NEVER reveal which field is wrong.
+   164→  if (
+   165→    lower.includes("invalid credentials") ||
+   166→    lower.includes("invalid login credentials") ||
+   167→    lower.includes("email not confirmed")
+   168→  ) {
+   169→    return new AuthenticationError("Invalid email or password.");
+   170→  }
+   171→
+   172→  // Rate-limited by Supabase itself.
+   173→  if (err.status === 429 || lower.includes("rate limit")) {
+   174→    return new AuthenticationError("Too many attempts. Please try again later.");
+   175→  }
+   176→
+   177→  // Retryable upstream failure.
+   178→  if (err.name === "AuthRetryableError") {
+   179→    return new ExternalServiceError("Authentication service is temporarily unavailable.");
+   180→  }
+   181→
+   182→  // Fall through: treat as auth error but mark internal so the message is hidden.
+   183→  return new AuthenticationError("We couldn't complete the authentication request.", {
+   184→    cause: { name: err.name, message: msg },
+   185→  });
+   186→}
+   187→
+   188→// ---------------------------------------------------------------------------
+   189→// AuthService
+   190→// ---------------------------------------------------------------------------
+   191→
+   192→/**
+   193→ * Server-only orchestrator. Use via {@link createAuthService} (the per-request
+   194→ * factory). Do not construct directly outside tests.
+   195→ */
+   196→export class AuthService {
+   197→  // Per-request Supabase server client (anon key, RLS-enforced, session-bearing).
+   198→  private readonly supabase: ServerSupabaseClient;
+   199→
+   200→  // Data-access services. The async ones are constructed once per request by
+   201→  // `createAuthService()` and passed in here so the constructor stays sync.
+   202→  private readonly profileService: ProfileService;
+   203→  private readonly sessionService: SessionService;
+   204→  private readonly notificationService: NotificationService;
+   205→  private readonly activityService: ActivityLogService;
+   206→  private readonly accountService: AccountService;
+   207→  private readonly linkedAccountsService: LinkedAccountsService;
+   208→
+   209→  constructor(opts: {
+   210→    supabase: ServerSupabaseClient;
+   211→    profileService: ProfileService;
+   212→    sessionService: SessionService;
+   213→    notificationService: NotificationService;
+   214→    activityService: ActivityLogService;
+   215→    accountService: AccountService;
+   216→    linkedAccountsService: LinkedAccountsService;
+   217→  }) {
+   218→    this.supabase = opts.supabase;
+   219→    this.profileService = opts.profileService;
+   220→    this.sessionService = opts.sessionService;
+   221→    this.notificationService = opts.notificationService;
+   222→    this.activityService = opts.activityService;
+   223→    this.accountService = opts.accountService;
+   224→    this.linkedAccountsService = opts.linkedAccountsService;
+   225→  }
+   226→
+   227→  // -------------------------------------------------------------------------
+   228→  // Email + password flows
+   229→  // -------------------------------------------------------------------------
+   230→
+   231→  /**
+   232→   * Sign up a new user with email + password. Optionally seeds the user's
+   233→   * `full_name` from `displayName`.
+   234→   *
+   235→   * Behavior:
+   236→   *   - Calls `supabase.auth.signUp()` with `emailRedirectTo` set to the app
+   237→   *     callback URL.
+   238→   *   - When Supabase returns a session immediately (email confirmation
+   239→   *     disabled), `needsEmailVerification` is `false`; otherwise `true`.
+   240→   *   - Writes a `signup` activity log + a `welcome` notification.
+   241→   *   - Maps Supabase errors per {@link mapSupabaseAuthError}.
+   242→   */
+   243→  async signUpWithEmail(input: SignUpInput): Promise<SignUpResult> {
+   244→    const email = input.email.trim().toLowerCase();
+   245→    const displayName = input.displayName?.trim() || undefined;
+   246→
+   247→    const { data, error } = await this.supabase.auth.signUp({
+   248→      email,
+   249→      password: input.password,
+   250→      options: {
+   251→        emailRedirectTo: `${env.app.url}/api/auth/callback`,
+   252→        data: displayName ? { full_name: displayName, name: displayName } : undefined,
+   253→      },
+   254→    });
+   255→
+   256→    if (error) {
+   257→      throw mapSupabaseAuthError(error);
+   258→    }
+   259→
+   260→    const user = data.user;
+   261→    if (!user) {
+   262→      // Should not happen — signUp returns either an error or a user.
+   263→      throw new DatabaseError("Supabase signUp returned no user and no error.");
+   264→    }
+   265→
+   266→    // `session` is null when email verification is required.
+   267→    const needsEmailVerification = data.session === null;
+   268→
+   269→    // Best-effort enrichment — never fail the sign-up over a logging blip.
+   270→    await this.writeActivity({
+   271→      userId: user.id,
+   272→      eventType: "signup",
+   273→      severity: "info",
+   274→      metadata: sanitizeMetadata({
+   275→        method: "email",
+   276→        emailVerified: !!user.email_confirmed_at,
+   277→        needsEmailVerification,
+   278→      }),
+   279→    }).catch((err) => {
+   280→      logger.warn("auth.signUp: activity log write failed", { error: String(err) });
+   281→    });
+   282→
+   283→    await this.notificationService
+   284→      .create(user.id, {
+   285→        type: "welcome",
+   286→        title: "Welcome to Supa AI",
+   287→        message: displayName
+   288→          ? `Welcome aboard, ${displayName}! Your account is ready.`
+   289→          : "Welcome aboard! Your account is ready.",
+   290→        actionUrl: "/dashboard",
+   291→        actionLabel: "Go to dashboard",
+   292→        metadata: { source: "signup" },
+   293→      })
+   294→      .catch((err) => {
+   295→        logger.warn("auth.signUp: welcome notification failed", { error: String(err) });
+   296→      });
+   297→
+   298→    logger.info("auth.signUp: user signed up", {
+   299→      userId: user.id,
+   300→      needsEmailVerification,
+   301→    });
+   302→
+   303→    return { user, needsEmailVerification };
+   304→  }
+   305→
+   306→  /**
+   307→   * Sign in with email + password.
+   308→   *
+   309→   * Brute-force protection: the caller is expected to have already called
+   310→   * `checkBruteForce()` and rejected if locked. **On a failed sign-in** this
+   311→   * method records the failed attempt via `recordFailedAttempt()` and throws
+   312→   * `RateLimitError` if the threshold is reached. On success it clears the
+   313→   * counter.
+   314→   *
+   315→   * The caller MUST pass `bfKey` so we can attribute the failure correctly.
+   316→   */
+   317→  async signInWithEmail(
+   318→    input: SignInInput,
+   319→    ctx: { ip: string; userAgent: string | null; bfKey: string },
+   320→  ): Promise<SignInResult> {
+   321→    const email = input.email.trim().toLowerCase();
+   322→
+   323→    // Re-check the lock right before attempting — covers the race where the
+   324→    // counter flipped over between the route's pre-check and this call.
+   325→    const preCheck = await checkBruteForce(ctx.bfKey);
+   326→    if (preCheck.locked) {
+   327→      throw new RateLimitError(
+   328→        "Too many failed sign-in attempts. Please try again later.",
+   329→        preCheck.retryAfter,
+   330→        { attempts: preCheck.attempts },
+   331→      );
+   332→    }
+   333→
+   334→    const { data, error } = await this.supabase.auth.signInWithPassword({
+   335→      email,
+   336→      password: input.password,
+   337→    });
+   338→
+   339→    if (error) {
+   340→      // Record the failure — if this bump crosses the threshold, surface as
+   341→      // a RateLimitError so the client sees the lockout immediately.
+   342→      const state = await recordFailedAttempt(ctx.bfKey);
+   343→      if (state.locked) {
+   344→        // Also log the lockout event for security visibility.
+   345→        await this.writeActivity({
+   346→          userId: null,
+   347→          eventType: "failed_login",
+   348→          severity: "warn",
+   349→          metadata: sanitizeMetadata({
+   350→            email,
+   351→            ip: ctx.ip,
+   352→            reason: "brute_force_lock",
+   353→            attempts: state.attempts,
+   354→          }),
+   355→          ipAddress: ctx.ip,
+   356→          userAgent: ctx.userAgent,
+   357→        }).catch(() => {});
+   358→        throw new RateLimitError(
+   359→          "Too many failed sign-in attempts. Please try again later.",
+   360→          state.retryAfter,
+   361→          { attempts: state.attempts },
+   362→        );
+   363→      }
+   364→
+   365→      // Log the failed attempt (no userId — we don't know who they are).
+   366→      await this.writeActivity({
+   367→        userId: null,
+   368→        eventType: "failed_login",
+   369→        severity: "warn",
+   370→        metadata: sanitizeMetadata({
+   371→          email,
+   372→          ip: ctx.ip,
+   373→          reason: error.name,
+   374→        }),
+   375→        ipAddress: ctx.ip,
+   376→        userAgent: ctx.userAgent,
+   377→      }).catch(() => {});
+   378→
+   379→      // Map to a generic "invalid credentials" message — never reveal which
+   380→      // of email/password is wrong.
+   381→      throw mapSupabaseAuthError(error);
+   382→    }
+   383→
+   384→    const user = data.user;
+   385→    if (!user) {
+   386→      throw new AuthenticationError("Sign-in failed. Please try again.");
+   387→    }
+   388→
+   389→    // Success — clear the brute-force counter for this identity.
+   390→    await clearAttempts(ctx.bfKey);
+   391→
+   392→    // Record the user_session row (UA/IP/device/geo). The SessionService
+   393→    // parses the UA internally; we just hand it the raw string.
+   394→    await this.sessionService
+   395→      .recordSession(user.id, {
+   396→        userAgent: ctx.userAgent ?? null,
+   397→        ipAddress: ctx.ip || null,
+   398→        // Mark this as the current session. The user_sessions.is_current flag
+   399→        // is best-effort — the SessionService does NOT clear prior is_current
+   400→        // rows on insert, so the dashboard may show multiple "current"
+   401→        // sessions until the older ones are revoked.
+   402→        isCurrent: true,
+   403→      })
+   404→      .catch((err) => {
+   405→        logger.warn("auth.signIn: session record failed", { error: String(err) });
+   406→      });
+   407→
+   408→    await this.writeActivity({
+   409→      userId: user.id,
+   410→      eventType: "login",
+   411→      severity: "info",
+   412→      metadata: sanitizeMetadata({
+   413→        method: "email",
+   414→        ip: ctx.ip,
+   415→      }),
+   416→      ipAddress: ctx.ip,
+   417→      userAgent: ctx.userAgent,
+   418→    });
+   419→
+   420→    logger.info("auth.signIn: user signed in", { userId: user.id });
+   421→    return { user };
+   422→  }
+   423→
+   424→  /**
+   425→   * Sign out the current user. Always logs a `logout` activity (best-effort).
+   426→   * Idempotent — calling signOut with no session is a no-op for Supabase but
+   427→   * still returns `void`.
+   428→   */
+   429→  async signOut(): Promise<void> {
+   430→    const ctx = await getSession();
+   431→    const userId = ctx?.user.id ?? null;
+   432→
+   433→    const { error } = await this.supabase.auth.signOut();
+   434→    if (error) {
+   435→      logger.warn("auth.signOut: supabase returned error", {
+   436→        errorName: error.name,
+   437→        errorMessage: error.message,
+   438→      });
+   439→      // Continue — from the caller's POV the session is gone either way.
+   440→    }
+   441→
+   442→    if (userId) {
+   443→      await this.writeActivity({
+   444→        userId,
+   445→        eventType: "logout",
+   446→        severity: "info",
+   447→        metadata: sanitizeMetadata({ method: "email" }),
+   448→      }).catch(() => {});
+   449→    }
+   450→
+   451→    logger.info("auth.signOut: user signed out", { userId });
+   452→  }
+   453→
+   454→  // -------------------------------------------------------------------------
+   455→  // Password reset + change flows
+   456→  // -------------------------------------------------------------------------
+   457→
+   458→  /**
+   459→   * Request a password-reset email. ALWAYS returns successfully — never
+   460→   * reveals whether the email exists. The caller's route handler should
+   461→   * surface a generic "if an account exists, you'll receive an email"
+   462→   * message regardless.
+   463→   *
+   464→   * Logs the request (without revealing whether the email exists in the
+   465→   * user table) at info severity.
+   466→   */
+   467→  async requestPasswordReset(email: string): Promise<void> {
+   468→    const normalizedEmail = email.trim().toLowerCase();
+   469→
+   470→    const { error } = await this.supabase.auth.resetPasswordForEmail(
+   471→      normalizedEmail,
+   472→      { redirectTo: `${env.app.url}/api/auth/callback?next=/reset-password` },
+   473→    );
+   474→
+   475→    if (error) {
+   476→      // Supabase returns an error for invalid email format etc.; we still
+   477→      // don't want to leak whether the email exists. Log + return success.
+   478→      logger.warn("auth.requestPasswordReset: supabase returned error", {
+   479→        errorName: error.name,
+   480→        errorMessage: error.message,
+   481→      });
+   482→    }
+   483→
+   484→    // Log the request — no userId since we don't know if the email maps to a
+   485→    // real user (and we deliberately don't look it up).
+   486→    await this.writeActivity({
+   487→      userId: null,
+   488→      eventType: "password_reset",
+   489→      severity: "info",
+   490→      metadata: sanitizeMetadata({ email: normalizedEmail, request: "initiate" }),
+   491→    }).catch(() => {});
+   492→
+   493→    logger.info("auth.requestPasswordReset: reset email requested", {
+   494→      email: normalizedEmail,
+   495→    });
+   496→  }
+   497→
+   498→  /**
+   499→   * Reset the password using the session established when the user clicked
+   500→   * the reset link. The route handler must enforce that a session exists
+   501→   * (the `requireAuth()` gate).
+   502→   *
+   503→   * Logs `password_reset` and creates a `security` notification.
+   504→   */
+   505→  async resetPassword(newPassword: string): Promise<void> {
+   506→    const ctx = await getSession();
+   507→    if (!ctx) {
+   508→      throw new AuthenticationError("Sign in to reset your password.");
+   509→    }
+   510→    const userId = ctx.user.id;
+   511→
+   512→    const { error } = await this.supabase.auth.updateUser({ password: newPassword });
+   513→    if (error) {
+   514→      throw mapSupabaseAuthError(error);
+   515→    }
+   516→
+   517→    await this.writeActivity({
+   518→      userId,
+   519→      eventType: "password_reset",
+   520→      severity: "info",
+   521→      metadata: sanitizeMetadata({ method: "reset_link" }),
+   522→    });
+   523→
+   524→    await this.notificationService
+   525→      .create(userId, {
+   526→        type: "security",
+   527→        title: "Your password was changed",
+   528→        message:
+   529→          "Your account password was just changed. If this was you, no action is needed. If not, please contact support immediately.",
+   530→        actionUrl: "/settings/security",
+   531→        actionLabel: "Review security",
+   532→        metadata: { event: "password_reset" },
+   533→      })
+   534→      .catch((err) => {
+   535→        logger.warn("auth.resetPassword: notification failed", { error: String(err) });
+   536→      });
+   537→
+   538→    logger.info("auth.resetPassword: password reset completed", { userId });
+   539→  }
+   540→
+   541→  /**
+   542→   * Change the password for the currently-authenticated user. Requires
+   543→   * re-authentication with the current password (defense against a stolen
+   544→   * session cookie being used to lock the user out).
+   545→   *
+   546→   * After a successful change:
+   547→   *   - Revokes all other sessions (signs out other devices).
+   548→   *   - Logs `password_change`.
+   549→   *   - Creates a `security` notification.
+   550→   */
+   551→  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+   552→    const ctx = await getSession();
+   553→    if (!ctx) {
+   554→      throw new AuthenticationError("Sign in to change your password.");
+   555→    }
+   556→    const userId = ctx.user.id;
+   557→    const email = ctx.user.email;
+   558→    if (!email) {
+   559→      throw new AuthenticationError("Account email is missing.");
+   560→    }
+   561→
+   562→    // Re-authenticate with the current password. We use a FRESH server client
+   563→    // for this so the caller's existing session isn't disturbed if the
+   564→    // password is wrong.
+   565→    const reauthClient = await this.createPkcClient();
+   566→    const { error: reauthError } = await reauthClient.auth.signInWithPassword({
+   567→      email,
+   568→      password: currentPassword,
+   569→    });
+   570→
+   571→    if (reauthError) {
+   572→      // Don't reveal whether the email exists — the caller is authenticated,
+   573→      // so we know it does, but the error message should still be generic.
+   574→      throw new AuthenticationError("Current password is incorrect.");
+   575→    }
+   576→
+   577→    // Update the password on the caller's session client.
+   578→    const { error: updateError } = await this.supabase.auth.updateUser({
+   579→      password: newPassword,
+   580→    });
+   581→    if (updateError) {
+   582→      throw mapSupabaseAuthError(updateError);
+   583→    }
+   584→
+   585→    // Revoke other sessions (best-effort). We don't have a stable session id
+   586→    // for the current one (the access_token rotates), so we pass `undefined`
+   587→    // for `exceptSessionId` — the SessionService will revoke every active
+   588→    // session. The current device will need to re-authenticate on the next
+   589→    // request, which is the desired security posture after a password change.
+   590→    await this.sessionService
+   591→      .revokeAllSessions(userId)
+   592→      .catch((err) => {
+   593→        logger.warn("auth.changePassword: revoke sessions failed", { error: String(err) });
+   594→      });
+   595→
+   596→    await this.writeActivity({
+   597→      userId,
+   598→      eventType: "password_change",
+   599→      severity: "info",
+   600→      metadata: sanitizeMetadata({ method: "self_service" }),
+   601→    });
+   602→
+   603→    await this.notificationService
+   604→      .create(userId, {
+   605→        type: "security",
+   606→        title: "Your password was changed",
+   607→        message:
+   608→          "Your account password was just changed and all other sessions were signed out. If this was you, no action is needed.",
+   609→        actionUrl: "/settings/security",
+   610→        actionLabel: "Review security",
+   611→        metadata: { event: "password_change" },
+   612→      })
+   613→      .catch((err) => {
+   614→        logger.warn("auth.changePassword: notification failed", { error: String(err) });
+   615→      });
+   616→
+   617→    logger.info("auth.changePassword: password changed", { userId });
+   618→  }
+   619→
+   620→  // -------------------------------------------------------------------------
+   621→  // Email change + verification flows
+   622→  // -------------------------------------------------------------------------
+   623→
+   624→  /**
+   625→   * Initiate an email change. Supabase triggers its own email-change
+   626→   * verification flow (sends a confirmation email to the NEW address; the
+   627→   * change only lands when the user clicks the link).
+   628→   *
+   629→   * This method returns immediately — the change is NOT reflected on the
+   630→   * user's account until they verify the new email.
+   631→   */
+   632→  async changeEmail(newEmail: string): Promise<void> {
+   633→    const ctx = await getSession();
+   634→    if (!ctx) {
+   635→      throw new AuthenticationError("Sign in to change your email.");
+   636→    }
+   637→    const userId = ctx.user.id;
+   638→
+   639→    const { error } = await this.supabase.auth.updateUser({ email: newEmail });
+   640→    if (error) {
+   641→      // Map: "email already in use" → ConflictError.
+   642→      if (
+   643→        error.message.toLowerCase().includes("already") &&
+   644→        error.message.toLowerCase().includes("use")
+   645→      ) {
+   646→        throw new ConflictError("That email is already in use.");
+   647→      }
+   648→      throw mapSupabaseAuthError(error);
+   649→    }
+   650→
+   651→    await this.writeActivity({
+   652→      userId,
+   653→      eventType: "email_change",
+   654→      severity: "info",
+   655→      metadata: sanitizeMetadata({ newEmail, status: "pending_verification" }),
+   656→    });
+   657→
+   658→    logger.info("auth.changeEmail: email change requested", { userId });
+   659→  }
+   660→
+   661→  /**
+   662→   * Verify an email using a token hash (the kind Supabase sends in the
+   663→   * signup / email-change confirmation links when using PKCE flow).
+   664→   *
+   665→   * `type` is the Supabase verifyOtp type ('signup' | 'email_change' |
+   666→   * 'recovery' | 'invite' | 'magiclink' | 'email').
+   667→   */
+   668→  async verifyEmail(
+   669→    tokenHash: string,
+   670→    type:
+   671→      | "signup"
+   672→      | "email_change"
+   673→      | "recovery"
+   674→      | "invite"
+   675→      | "magiclink"
+   676→      | "email",
+   677→  ): Promise<void> {
+   678→    const { data, error } = await this.supabase.auth.verifyOtp({
+   679→      token_hash: tokenHash,
+   680→      type,
+   681→    });
+   682→
+   683→    if (error) {
+   684→      throw mapSupabaseAuthError(error);
+   685→    }
+   686→
+   687→    const userId = data.user?.id;
+   688→    if (!userId) {
+   689→      // No session established — verification didn't bind to a user. Log + return.
+   690→      logger.info("auth.verifyEmail: verified without user", { type });
+   691→      return;
+   692→    }
+   693→
+   694→    // Mark the profile's email_verified flag (best-effort).
+   695→    await this.profileService
+   696→      .markEmailVerified(userId)
+   697→      .catch((err) => {
+   698→        logger.warn("auth.verifyEmail: profile update failed", { error: String(err) });
+   699→      });
+   700→
+   701→    await this.writeActivity({
+   702→      userId,
+   703→      eventType: "email_verified",
+   704→      severity: "info",
+   705→      metadata: sanitizeMetadata({ type }),
+   706→    });
+   707→
+   708→    logger.info("auth.verifyEmail: email verified", { userId, type });
+   709→  }
+   710→
+   711→  /**
+   712→   * Resend the signup verification email to the currently-authenticated user.
+   713→   * (Supabase also supports resending to an arbitrary email, but we require
+   714→   * a session so anonymous visitors can't enumerate accounts.)
+   715→   */
+   716→  async resendVerificationEmail(): Promise<void> {
+   717→    const ctx = await getSession();
+   718→    if (!ctx) {
+   719→      throw new AuthenticationError("Sign in to resend the verification email.");
+   720→    }
+   721→    const userId = ctx.user.id;
+   722→    const email = ctx.user.email;
+   723→    if (!email) {
+   724→      throw new AuthenticationError("Account email is missing.");
+   725→    }
+   726→
+   727→    const { error } = await this.supabase.auth.resend({
+   728→      type: "signup",
+   729→      email,
+   730→      options: { emailRedirectTo: `${env.app.url}/api/auth/callback` },
+   731→    });
+   732→
+   733→    if (error) {
+   734→      throw mapSupabaseAuthError(error);
+   735→    }
+   736→
+   737→    logger.info("auth.resendVerification: sent", { userId });
+   738→  }
+   739→
+   740→  // -------------------------------------------------------------------------
+   741→  // OAuth flows (PKCE)
+   742→  // -------------------------------------------------------------------------
+   743→
+   744→  /**
+   745→   * Get the OAuth authorization URL for `provider`. Uses the PKCE flow
+   746→   * (code verifier + code challenge) so the callback can exchange the code
+   747→   * server-side without exposing a token in the URL fragment.
+   748→   *
+   749→   * Returns the URL only — the caller's browser navigates there.
+   750→   */
+   751→  async getOAuthSignInUrl(
+   752→    provider: OAuthProviderId,
+   753→    redirectTo?: string,
+   754→  ): Promise<string> {
+   755→    const safeRedirectTo =
+   756→      redirectTo && redirectTo.startsWith("/") && !redirectTo.startsWith("//")
+   757→        ? `${env.app.url}${redirectTo}`
+   758→        : `${env.app.url}/api/auth/callback`;
+   759→
+   760→    const oauthClient = await this.createPkcClient();
+   761→    const { data, error } = await oauthClient.auth.signInWithOAuth({
+   762→      provider: provider as Provider,
+   763→      options: {
+   764→        redirectTo: safeRedirectTo,
+   765→        skipBrowserRedirect: true, // we want the URL, not a redirect
+   766→      },
+   767→    });
+   768→
+   769→    if (error) {
+   770→      throw mapSupabaseAuthError(error);
+   771→    }
+   772→
+   773→    if (!data?.url) {
+   774→      throw new ExternalServiceError("OAuth provider did not return a URL.");
+   775→    }
+   776→
+   777→    logger.info("auth.oauth.signin: generated URL", { provider });
+   778→    return data.url;
+   779→  }
+   780→
+   781→  /**
+   782→   * Exchange the OAuth `code` for a session. After exchange:
+   783→   *   - Logs `login` + `oauth_link` activities.
+   784→   *   - Records a `user_sessions` row.
+   785→   *   - Upserts a `linked_accounts` row for the provider.
+   786→   *
+   787→   * Called by the `/api/auth/callback` route handler.
+   788→   */
+   789→  async handleOAuthCallback(
+   790→    code: string,
+   791→    ctx: { ip: string; userAgent: string | null },
+   792→  ): Promise<OAuthCallbackResult> {
+   793→    const oauthClient = await this.createPkcClient();
+   794→    const { data, error } = await oauthClient.auth.exchangeCodeForSession(code);
+   795→
+   796→    if (error) {
+   797→      throw mapSupabaseAuthError(error);
+   798→    }
+   799→
+   800→    const user = data.user;
+   801→    if (!user) {
+   802→      throw new AuthenticationError("OAuth callback did not establish a session.");
+   803→    }
+   804→
+   805→    // Extract the OAuth identity from the user's `identities` array.
+   806→    const oauthIdentity = user.identities?.[0];
+   807→    const providerName = oauthIdentity?.provider ?? "oauth";
+   808→
+   809→    // Record the user_session row.
+   810→    await this.sessionService
+   811→      .recordSession(user.id, {
+   812→        userAgent: ctx.userAgent ?? null,
+   813→        ipAddress: ctx.ip || null,
+   814→        isCurrent: true,
+   815→      })
+   816→      .catch((err) => {
+   817→        logger.warn("auth.oauth.callback: session record failed", { error: String(err) });
+   818→      });
+   819→
+   820→    // Upsert the linked_account. The unique (user_id, provider) constraint
+   821→    // means a re-link of an already-linked provider will throw — we swallow
+   822→    // that conflict (it's a no-op: the provider is already linked).
+   823→    if (oauthIdentity) {
+   824→      await this.linkedAccountsService
+   825→        .link(user.id, providerName, {
+   826→          providerAccountId: oauthIdentity.id ?? null,
+   827→          providerEmail:
+   828→            (oauthIdentity.identity_data?.email as string | undefined) ??
+   829→            user.email ??
+   830→            null,
+   831→          metadata: sanitizeMetadata({
+   832→            provider: providerName,
+   833→            linkedAt: new Date().toISOString(),
+   834→          }),
+   835→        })
+   836→        .catch((err) => {
+   837→          // ConflictError is expected when the provider is already linked —
+   838→          // log + continue. Other errors are also non-fatal here.
+   839→          logger.warn("auth.oauth.callback: linked account upsert failed", {
+   840→            error: String(err),
+   841→            provider: providerName,
+   842→          });
+   843→        });
+   844→    }
+   845→
+   846→    await this.writeActivity({
+   847→      userId: user.id,
+   848→      eventType: "login",
+   849→      severity: "info",
+   850→      metadata: sanitizeMetadata({
+   851→        method: "oauth",
+   852→        provider: providerName,
+   853→        ip: ctx.ip,
+   854→      }),
+   855→      ipAddress: ctx.ip,
+   856→      userAgent: ctx.userAgent,
+   857→    });
+   858→
+   859→    await this.writeActivity({
+   860→      userId: user.id,
+   861→      eventType: "oauth_link",
+   862→      severity: "info",
+   863→      metadata: sanitizeMetadata({ provider: providerName }),
+   864→    });
+   865→
+   866→    logger.info("auth.oauth.callback: signed in", { userId: user.id, provider: providerName });
+   867→    return { user };
+   868→  }
+   869→
+   870→  // -------------------------------------------------------------------------
+   871→  // Account management
+   872→  // -------------------------------------------------------------------------
+   873→
+   874→  /**
+   875→   * Delete the caller's account. Requires the current password for
+   876→   * verification (defense against a stolen session cookie being used to
+   877→   * delete the account).
+   878→   *
+   879→   * Flow:
+   880→   *   1. Re-authenticate with the password (fresh client, doesn't touch the
+   881→   *      caller's session).
+   882→   *   2. Delegate row deletion to {@link accountService.deleteAccount} which
+   883→   *      uses the service-role client.
+   884→   *   3. Sign out (destroys the caller's session cookie).
+   885→   *   4. Log `account_deleted`.
+   886→   */
+   887→  async deleteAccount(password: string): Promise<void> {
+   888→    const ctx = await getSession();
+   889→    if (!ctx) {
+   890→      throw new AuthenticationError("Sign in to delete your account.");
+   891→    }
+   892→    const userId = ctx.user.id;
+   893→    const email = ctx.user.email;
+   894→    if (!email) {
+   895→      throw new AuthenticationError("Account email is missing.");
+   896→    }
+   897→
+   898→    // Re-authenticate (fresh client so a wrong password doesn't log out the caller).
+   899→    const reauthClient = await this.createPkcClient();
+   900→    const { error: reauthError } = await reauthClient.auth.signInWithPassword({
+   901→      email,
+   902→      password,
+   903→    });
+   904→    if (reauthError) {
+   905→      throw new AuthenticationError("Password is incorrect.");
+   906→    }
+   907→
+   908→    // Delegate the destructive work to the account service (uses admin client).
+   909→    await this.accountService.deleteAccount(userId);
+   910→
+   911→    // Sign out (best-effort).
+   912→    await this.supabase.auth.signOut().catch(() => {});
+   913→
+   914→    await this.writeActivity({
+   915→      userId,
+   916→      eventType: "account_deleted",
+   917→      severity: "warn",
+   918→      metadata: sanitizeMetadata({ method: "self_service" }),
+   919→    });
+   920→
+   921→    logger.info("auth.deleteAccount: account deleted", { userId });
+   922→  }
+   923→
+   924→  /**
+   925→   * Request a GDPR data export. Returns a signed URL + expiry timestamp.
+   926→   * Delegates to {@link accountService.requestDataExport}.
+   927→   */
+   928→  async downloadMyData(): Promise<DownloadDataResult> {
+   929→    const ctx = await getSession();
+   930→    if (!ctx) {
+   931→      throw new AuthenticationError("Sign in to download your data.");
+   932→    }
+   933→    const userId = ctx.user.id;
+   934→
+   935→    const request = await this.accountService.requestDataExport(userId);
+   936→
+   937→    if (!request.download_url || !request.expires_at) {
+   938→      throw new DatabaseError("Data export did not produce a download URL.");
+   939→    }
+   940→
+   941→    logger.info("auth.downloadData: export completed", { userId, requestId: request.id });
+   942→    return {
+   943→      downloadUrl: request.download_url,
+   944→      expiresAt: request.expires_at,
+   945→    };
+   946→  }
+   947→
+   948→  // -------------------------------------------------------------------------
+   949→  // Internals
+   950→  // -------------------------------------------------------------------------
+   951→
+   952→  /**
+   953→   * Thin wrapper around the activity service so we don't have to repeat the
+   954→   * IP/User-Agent plumbing at every call site. The activity service is
+   955→   * itself responsible for using the admin client (RLS bypass) for inserts.
+   956→   */
+   957→  private async writeActivity(input: {
+   958→    userId: string | null;
+   959→    eventType: ActivityEventType | string;
+   960→    severity?: ActivitySeverity;
+   961→    metadata?: unknown;
+   962→    ipAddress?: string | null;
+   963→    userAgent?: string | null;
+   964→  }): Promise<void> {
+   965→    await this.activityService.log(input.userId, input.eventType, {
+   966→      metadata: input.metadata,
+   967→      severity: input.severity ?? "info",
+   968→      ipAddress: input.ipAddress ?? null,
+   969→      userAgent: input.userAgent ?? null,
+   970→    });
+   971→  }
+   972→
+   973→  /**
+   974→   * Construct a server Supabase client configured for the PKCE auth flow.
+   975→   * Used by OAuth initiation + callback, and by re-authentication (we want
+   976→   * a fresh auth context so a wrong password doesn't log the caller out of
+   977→   * their existing session).
+   978→   *
+   979→   * Wires the same `cookies()` store as the regular server client so the
+   980→   * session lands in the user's cookie jar after `exchangeCodeForSession`.
+   981→   */
+   982→  private async createPkcClient(): Promise<ServerSupabaseClient> {
+   983→    const cookieStore = await cookies();
+   984→    return createServerClient<Database>(env.supabase.url, env.supabase.anonKey, {
+   985→      cookies: {
+   986→        getAll() {
+   987→          return cookieStore.getAll();
+   988→        },
+   989→        setAll(cookiesToSet) {
+   990→          try {
+   991→            cookiesToSet.forEach(({ name, value, options }) => {
+   992→              cookieStore.set(name, value, options);
+   993→            });
+   994→          } catch {
+   995→            // Same caveat as the regular server client: setting cookies from
+   996→            // a Server Component is a no-op (response already streaming).
+   997→            // The middleware will refresh the session on the next request.
+   998→          }
+   999→        },
+  1000→      },
+  1001→      auth: {
+  1002→        flowType: "pkce",
+  1003→        autoRefreshToken: true,
+  1004→        persistSession: true,
+  1005→        detectSessionInUrl: false,
+  1006→      },
+  1007→    });
+  1008→  }
+  1009→}
+  1010→
+  1011→// ---------------------------------------------------------------------------
+  1012→// Factory
+  1013→// ---------------------------------------------------------------------------
+  1014→
+  1015→/**
+  1016→ * Build an {@link AuthService} bound to the current request. Per-request:
+  1017→ * each call constructs a fresh service so the cookie store + the underlying
+  1018→ * Supabase server client are correctly scoped.
+  1019→ *
+  1020→ * The async data-service factories are awaited here so the {@link AuthService}
+  1021→ * constructor stays synchronous.
+  1022→ */
+  1023→export async function createAuthService(): Promise<AuthService> {
+  1024→  const supabase = await createSupabaseServerClient();
+  1025→  const [profileService, sessionService, notificationService, linkedAccountsService] =
+  1026→    await Promise.all([
+  1027→      createProfileService(),
+  1028→      createSessionService(),
+  1029→      createNotificationService(),
+  1030→      createLinkedAccountsService(),
+  1031→    ]);
+  1032→  const activityService = createActivityLogService();
+  1033→  const accountService = createAccountService();
+  1034→
+  1035→  return new AuthService({
+  1036→    supabase,
+  1037→    profileService,
+  1038→    sessionService,
+  1039→    notificationService,
+  1040→    activityService,
+  1041→    accountService,
+  1042→    linkedAccountsService,
+  1043→  });
+  1044→}
+  1045→
+  1046→// Re-export the IP extractor from helpers so route handlers don't need to
+  1047→// import from two places.
+  1048→export { getClientIp } from "@/lib/auth/helpers";
+  1049→

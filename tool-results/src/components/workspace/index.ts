@@ -1,0 +1,9 @@
+export { WorkspaceView } from "./workspace-view";
+export { FolderTree } from "./folder-tree";
+export { DocumentEditor } from "./document-editor";
+export { VersionHistory } from "./version-history";
+export { MemberManager } from "./member-manager";
+export { KnowledgeBase } from "./knowledge-base";
+export { CommentsPanel } from "./comments-panel";
+export { WorkspaceSearch } from "./workspace-search";
+export { WorkspaceDashboard } from "./workspace-dashboard";

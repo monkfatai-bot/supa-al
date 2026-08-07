@@ -1,0 +1,1044 @@
+     1→/**
+     2→ * Supa AI — Hand-written Supabase database type map.
+     3→ *
+     4→ * Mirrors the SQL schema in `supabase/migrations/0001_init.sql`. Acts as the
+     5→ * generic parameter for every `SupabaseClient<Database>` so Postgrest queries
+     6→ * are fully typed end-to-end (insert, select, update) without codegen.
+     7→ *
+     8→ * NOTE: Keep this file in sync with the SQL migrations. When a migration adds
+     9→ * a column/table, update the corresponding `Row`/`Insert`/`Update` here.
+    10→ *
+    11→ * @module @/lib/supabase/types
+    12→ */
+    13→
+    14→/** Postgres representation of a UUID. */
+    15→type Uuid = string;
+    16→/** Postgres representation of a JSON/JSONB column. */
+    17→type Json =
+    18→  | string
+    19→  | number
+    20→  | boolean
+    21→  | null
+    22→  | { [key: string]: Json | undefined }
+    23→  | Json[];
+    24→
+    25→/**
+    26→ * Canonical Supabase database schema.
+    27→ *
+    28→ * @see https://supabase.com/docs/reference/javascript/typescript-support
+    29→ */
+    30→export interface Database {
+    31→  public: {
+    32→    Tables: {
+    33→      users: {
+    34→        Row: {
+    35→          id: Uuid;
+    36→          email: string | null;
+    37→          full_name: string | null;
+    38→          avatar_url: string | null;
+    39→          role: string;
+    40→          platform_role: string;
+    41→          created_at: string;
+    42→          updated_at: string;
+    43→        };
+    44→        Insert: {
+    45→          id: Uuid;
+    46→          email?: string | null;
+    47→          full_name?: string | null;
+    48→          avatar_url?: string | null;
+    49→          role?: string;
+    50→          platform_role?: string;
+    51→          created_at?: string;
+    52→          updated_at?: string;
+    53→        };
+    54→        Update: {
+    55→          id?: Uuid;
+    56→          email?: string | null;
+    57→          full_name?: string | null;
+    58→          avatar_url?: string | null;
+    59→          role?: string;
+    60→          platform_role?: string;
+    61→          created_at?: string;
+    62→          updated_at?: string;
+    63→        };
+    64→        Relationships: [];
+    65→      };
+    66→
+    67→      organizations: {
+    68→        Row: {
+    69→          id: Uuid;
+    70→          name: string | null;
+    71→          slug: string | null;
+    72→          owner_id: Uuid | null;
+    73→          plan: string;
+    74→          created_at: string;
+    75→          updated_at: string;
+    76→        };
+    77→        Insert: {
+    78→          id?: Uuid;
+    79→          name?: string | null;
+    80→          slug?: string | null;
+    81→          owner_id?: Uuid | null;
+    82→          plan?: string;
+    83→          created_at?: string;
+    84→          updated_at?: string;
+    85→        };
+    86→        Update: {
+    87→          id?: Uuid;
+    88→          name?: string | null;
+    89→          slug?: string | null;
+    90→          owner_id?: Uuid | null;
+    91→          plan?: string;
+    92→          created_at?: string;
+    93→          updated_at?: string;
+    94→        };
+    95→        Relationships: [];
+    96→      };
+    97→
+    98→      organization_members: {
+    99→        Row: {
+   100→          id: Uuid;
+   101→          org_id: Uuid;
+   102→          user_id: Uuid;
+   103→          role: string;
+   104→          created_at: string;
+   105→        };
+   106→        Insert: {
+   107→          id?: Uuid;
+   108→          org_id: Uuid;
+   109→          user_id: Uuid;
+   110→          role?: string;
+   111→          created_at?: string;
+   112→        };
+   113→        Update: {
+   114→          id?: Uuid;
+   115→          org_id?: Uuid;
+   116→          user_id?: Uuid;
+   117→          role?: string;
+   118→          created_at?: string;
+   119→        };
+   120→        Relationships: [];
+   121→      };
+   122→
+   123→      subscriptions: {
+   124→        Row: {
+   125→          id: Uuid;
+   126→          org_id: Uuid | null;
+   127→          provider: string | null;
+   128→          provider_customer_id: string | null;
+   129→          provider_subscription_id: string | null;
+   130→          status: string | null;
+   131→          current_period_end: string | null;
+   132→          cancel_at_period_end: boolean | null;
+   133→          created_at: string;
+   134→          updated_at: string;
+   135→        };
+   136→        Insert: {
+   137→          id?: Uuid;
+   138→          org_id?: Uuid | null;
+   139→          provider?: string | null;
+   140→          provider_customer_id?: string | null;
+   141→          provider_subscription_id?: string | null;
+   142→          status?: string | null;
+   143→          current_period_end?: string | null;
+   144→          cancel_at_period_end?: boolean | null;
+   145→          created_at?: string;
+   146→          updated_at?: string;
+   147→        };
+   148→        Update: {
+   149→          id?: Uuid;
+   150→          org_id?: Uuid | null;
+   151→          provider?: string | null;
+   152→          provider_customer_id?: string | null;
+   153→          provider_subscription_id?: string | null;
+   154→          status?: string | null;
+   155→          current_period_end?: string | null;
+   156→          cancel_at_period_end?: boolean | null;
+   157→          created_at?: string;
+   158→          updated_at?: string;
+   159→        };
+   160→        Relationships: [];
+   161→      };
+   162→
+   163→      usage_records: {
+   164→        Row: {
+   165→          id: Uuid;
+   166→          org_id: Uuid | null;
+   167→          user_id: Uuid | null;
+   168→          feature: string | null;
+   169→          model: string | null;
+   170→          input_tokens: number | null;
+   171→          output_tokens: number | null;
+   172→          cost_cents: number | null;
+   173→          created_at: string;
+   174→        };
+   175→        Insert: {
+   176→          id?: Uuid;
+   177→          org_id?: Uuid | null;
+   178→          user_id?: Uuid | null;
+   179→          feature?: string | null;
+   180→          model?: string | null;
+   181→          input_tokens?: number | null;
+   182→          output_tokens?: number | null;
+   183→          cost_cents?: number | null;
+   184→          created_at?: string;
+   185→        };
+   186→        Update: {
+   187→          id?: Uuid;
+   188→          org_id?: Uuid | null;
+   189→          user_id?: Uuid | null;
+   190→          feature?: string | null;
+   191→          model?: string | null;
+   192→          input_tokens?: number | null;
+   193→          output_tokens?: number | null;
+   194→          cost_cents?: number | null;
+   195→          created_at?: string;
+   196→        };
+   197→        Relationships: [];
+   198→      };
+   199→
+   200→      api_keys: {
+   201→        Row: {
+   202→          id: Uuid;
+   203→          user_id: Uuid;
+   204→          name: string | null;
+   205→          key_prefix: string | null;
+   206→          hashed_key: string | null;
+   207→          last_used_at: string | null;
+   208→          created_at: string;
+   209→          revoked_at: string | null;
+   210→        };
+   211→        Insert: {
+   212→          id?: Uuid;
+   213→          user_id: Uuid;
+   214→          name?: string | null;
+   215→          key_prefix?: string | null;
+   216→          hashed_key?: string | null;
+   217→          last_used_at?: string | null;
+   218→          created_at?: string;
+   219→          revoked_at?: string | null;
+   220→        };
+   221→        Update: {
+   222→          id?: Uuid;
+   223→          user_id?: Uuid;
+   224→          name?: string | null;
+   225→          key_prefix?: string | null;
+   226→          hashed_key?: string | null;
+   227→          last_used_at?: string | null;
+   228→          created_at?: string;
+   229→          revoked_at?: string | null;
+   230→        };
+   231→        Relationships: [];
+   232→      };
+   233→
+   234→      ai_conversations: {
+   235→        Row: {
+   236→          id: Uuid;
+   237→          user_id: Uuid | null;
+   238→          org_id: Uuid | null;
+   239→          title: string | null;
+   240→          provider: string | null;
+   241→          model: string | null;
+   242→          metadata: Json | null;
+   243→          folder_id: Uuid | null;
+   244→          pinned: boolean;
+   245→          archived: boolean;
+   246→          system_prompt: string | null;
+   247→          last_message_preview: string | null;
+   248→          last_message_at: string | null;
+   249→          message_count: number;
+   250→          total_tokens: number;
+   251→          total_cost_cents: number;
+   252→          created_at: string;
+   253→          updated_at: string;
+   254→        };
+   255→        Insert: {
+   256→          id?: Uuid;
+   257→          user_id?: Uuid | null;
+   258→          org_id?: Uuid | null;
+   259→          title?: string | null;
+   260→          provider?: string | null;
+   261→          model?: string | null;
+   262→          metadata?: Json | null;
+   263→          folder_id?: Uuid | null;
+   264→          pinned?: boolean;
+   265→          archived?: boolean;
+   266→          system_prompt?: string | null;
+   267→          last_message_preview?: string | null;
+   268→          last_message_at?: string | null;
+   269→          message_count?: number;
+   270→          total_tokens?: number;
+   271→          total_cost_cents?: number;
+   272→          created_at?: string;
+   273→          updated_at?: string;
+   274→        };
+   275→        Update: {
+   276→          id?: Uuid;
+   277→          user_id?: Uuid | null;
+   278→          org_id?: Uuid | null;
+   279→          title?: string | null;
+   280→          provider?: string | null;
+   281→          model?: string | null;
+   282→          metadata?: Json | null;
+   283→          folder_id?: Uuid | null;
+   284→          pinned?: boolean;
+   285→          archived?: boolean;
+   286→          system_prompt?: string | null;
+   287→          last_message_preview?: string | null;
+   288→          last_message_at?: string | null;
+   289→          message_count?: number;
+   290→          total_tokens?: number;
+   291→          total_cost_cents?: number;
+   292→          created_at?: string;
+   293→          updated_at?: string;
+   294→        };
+   295→        Relationships: [];
+   296→      };
+   297→
+   298→      ai_messages: {
+   299→        Row: {
+   300→          id: Uuid;
+   301→          conversation_id: Uuid;
+   302→          role: "system" | "user" | "assistant" | "tool";
+   303→          content: Json | null;
+   304→          tokens: number | null;
+   305→          provider: string | null;
+   306→          model: string | null;
+   307→          input_tokens: number | null;
+   308→          output_tokens: number | null;
+   309→          total_tokens: number | null;
+   310→          cost_cents: number | null;
+   311→          latency_ms: number | null;
+   312→          finish_reason: string | null;
+   313→          error_message: string | null;
+   314→          edit_history: Json | null;
+   315→          parent_message_id: Uuid | null;
+   316→          created_at: string;
+   317→        };
+   318→        Insert: {
+   319→          id?: Uuid;
+   320→          conversation_id: Uuid;
+   321→          role: "system" | "user" | "assistant" | "tool";
+   322→          content?: Json | null;
+   323→          tokens?: number | null;
+   324→          provider?: string | null;
+   325→          model?: string | null;
+   326→          input_tokens?: number | null;
+   327→          output_tokens?: number | null;
+   328→          total_tokens?: number | null;
+   329→          cost_cents?: number | null;
+   330→          latency_ms?: number | null;
+   331→          finish_reason?: string | null;
+   332→          error_message?: string | null;
+   333→          edit_history?: Json | null;
+   334→          parent_message_id?: Uuid | null;
+   335→          created_at?: string;
+   336→        };
+   337→        Update: {
+   338→          id?: Uuid;
+   339→          conversation_id?: Uuid;
+   340→          role?: "system" | "user" | "assistant" | "tool";
+   341→          content?: Json | null;
+   342→          tokens?: number | null;
+   343→          provider?: string | null;
+   344→          model?: string | null;
+   345→          input_tokens?: number | null;
+   346→          output_tokens?: number | null;
+   347→          total_tokens?: number | null;
+   348→          cost_cents?: number | null;
+   349→          latency_ms?: number | null;
+   350→          finish_reason?: string | null;
+   351→          error_message?: string | null;
+   352→          edit_history?: Json | null;
+   353→          parent_message_id?: Uuid | null;
+   354→          created_at?: string;
+   355→        };
+   356→        Relationships: [];
+   357→      };
+   358→
+   359→      files: {
+   360→        Row: {
+   361→          id: Uuid;
+   362→          user_id: Uuid;
+   363→          org_id: Uuid | null;
+   364→          storage_path: string;
+   365→          filename: string | null;
+   366→          mime_type: string | null;
+   367→          size_bytes: number | null;
+   368→          created_at: string;
+   369→        };
+   370→        Insert: {
+   371→          id?: Uuid;
+   372→          user_id: Uuid;
+   373→          org_id?: Uuid | null;
+   374→          storage_path: string;
+   375→          filename?: string | null;
+   376→          mime_type?: string | null;
+   377→          size_bytes?: number | null;
+   378→          created_at?: string;
+   379→        };
+   380→        Update: {
+   381→          id?: Uuid;
+   382→          user_id?: Uuid;
+   383→          org_id?: Uuid | null;
+   384→          storage_path?: string;
+   385→          filename?: string | null;
+   386→          mime_type?: string | null;
+   387→          size_bytes?: number | null;
+   388→          created_at?: string;
+   389→        };
+   390→        Relationships: [];
+   391→      };
+   392→
+   393→      // ------------------------------------------------------------------
+   394→      // Phase 3: AI Chat Engine tables
+   395→      // (see supabase/migrations/0005_phase3_chat.sql)
+   396→      // ------------------------------------------------------------------
+   397→
+   398→      conversation_folders: {
+   399→        Row: {
+   400→          id: Uuid;
+   401→          user_id: Uuid;
+   402→          name: string;
+   403→          color: string | null;
+   404→          sort_order: number;
+   405→          created_at: string;
+   406→          updated_at: string;
+   407→        };
+   408→        Insert: {
+   409→          id?: Uuid;
+   410→          user_id: Uuid;
+   411→          name: string;
+   412→          color?: string | null;
+   413→          sort_order?: number;
+   414→          created_at?: string;
+   415→          updated_at?: string;
+   416→        };
+   417→        Update: {
+   418→          id?: Uuid;
+   419→          user_id?: Uuid;
+   420→          name?: string;
+   421→          color?: string | null;
+   422→          sort_order?: number;
+   423→          created_at?: string;
+   424→          updated_at?: string;
+   425→        };
+   426→        Relationships: [];
+   427→      };
+   428→
+   429→      message_attachments: {
+   430→        Row: {
+   431→          id: Uuid;
+   432→          message_id: Uuid;
+   433→          file_id: Uuid;
+   434→          sort_order: number;
+   435→          created_at: string;
+   436→        };
+   437→        Insert: {
+   438→          id?: Uuid;
+   439→          message_id: Uuid;
+   440→          file_id: Uuid;
+   441→          sort_order?: number;
+   442→          created_at?: string;
+   443→        };
+   444→        Update: {
+   445→          id?: Uuid;
+   446→          message_id?: Uuid;
+   447→          file_id?: Uuid;
+   448→          sort_order?: number;
+   449→          created_at?: string;
+   450→        };
+   451→        Relationships: [];
+   452→      };
+   453→
+   454→      prompt_templates: {
+   455→        Row: {
+   456→          id: Uuid;
+   457→          user_id: Uuid | null;
+   458→          title: string;
+   459→          description: string | null;
+   460→          category: string;
+   461→          content: string;
+   462→          variables: Json | null;
+   463→          is_favorite: boolean;
+   464→          is_public: boolean;
+   465→          sort_order: number;
+   466→          usage_count: number;
+   467→          created_at: string;
+   468→          updated_at: string;
+   469→        };
+   470→        Insert: {
+   471→          id?: Uuid;
+   472→          user_id?: Uuid | null;
+   473→          title: string;
+   474→          description?: string | null;
+   475→          category?: string;
+   476→          content: string;
+   477→          variables?: Json | null;
+   478→          is_favorite?: boolean;
+   479→          is_public?: boolean;
+   480→          sort_order?: number;
+   481→          usage_count?: number;
+   482→          created_at?: string;
+   483→          updated_at?: string;
+   484→        };
+   485→        Update: {
+   486→          id?: Uuid;
+   487→          user_id?: Uuid | null;
+   488→          title?: string;
+   489→          description?: string | null;
+   490→          category?: string;
+   491→          content?: string;
+   492→          variables?: Json | null;
+   493→          is_favorite?: boolean;
+   494→          is_public?: boolean;
+   495→          sort_order?: number;
+   496→          usage_count?: number;
+   497→          created_at?: string;
+   498→          updated_at?: string;
+   499→        };
+   500→        Relationships: [];
+   501→      };
+   502→
+   503→      ai_models: {
+   504→        Row: {
+   505→          id: Uuid;
+   506→          provider: string;
+   507→          model_id: string;
+   508→          label: string;
+   509→          context_window: number | null;
+   510→          max_output_tokens: number | null;
+   511→          input_cost_cents_per_1k: number | null;
+   512→          output_cost_cents_per_1k: number | null;
+   513→          capabilities: Json | null;
+   514→          is_enabled: boolean;
+   515→          is_default: boolean;
+   516→          sort_order: number;
+   517→          metadata: Json | null;
+   518→          created_at: string;
+   519→          updated_at: string;
+   520→        };
+   521→        Insert: {
+   522→          id?: Uuid;
+   523→          provider: string;
+   524→          model_id: string;
+   525→          label: string;
+   526→          context_window?: number | null;
+   527→          max_output_tokens?: number | null;
+   528→          input_cost_cents_per_1k?: number | null;
+   529→          output_cost_cents_per_1k?: number | null;
+   530→          capabilities?: Json | null;
+   531→          is_enabled?: boolean;
+   532→          is_default?: boolean;
+   533→          sort_order?: number;
+   534→          metadata?: Json | null;
+   535→          created_at?: string;
+   536→          updated_at?: string;
+   537→        };
+   538→        Update: {
+   539→          id?: Uuid;
+   540→          provider?: string;
+   541→          model_id?: string;
+   542→          label?: string;
+   543→          context_window?: number | null;
+   544→          max_output_tokens?: number | null;
+   545→          input_cost_cents_per_1k?: number | null;
+   546→          output_cost_cents_per_1k?: number | null;
+   547→          capabilities?: Json | null;
+   548→          is_enabled?: boolean;
+   549→          is_default?: boolean;
+   550→          sort_order?: number;
+   551→          metadata?: Json | null;
+   552→          created_at?: string;
+   553→          updated_at?: string;
+   554→        };
+   555→        Relationships: [];
+   556→      };
+   557→
+   558→      provider_health: {
+   559→        Row: {
+   560→          id: Uuid;
+   561→          provider: string;
+   562→          status: "healthy" | "degraded" | "down" | "unknown";
+   563→          success_count: number;
+   564→          error_count: number;
+   565→          avg_latency_ms: number | null;
+   566→          last_check_at: string | null;
+   567→          last_error: string | null;
+   568→          metadata: Json | null;
+   569→          created_at: string;
+   570→          updated_at: string;
+   571→        };
+   572→        Insert: {
+   573→          id?: Uuid;
+   574→          provider: string;
+   575→          status?: "healthy" | "degraded" | "down" | "unknown";
+   576→          success_count?: number;
+   577→          error_count?: number;
+   578→          avg_latency_ms?: number | null;
+   579→          last_check_at?: string | null;
+   580→          last_error?: string | null;
+   581→          metadata?: Json | null;
+   582→          created_at?: string;
+   583→          updated_at?: string;
+   584→        };
+   585→        Update: {
+   586→          id?: Uuid;
+   587→          provider?: string;
+   588→          status?: "healthy" | "degraded" | "down" | "unknown";
+   589→          success_count?: number;
+   590→          error_count?: number;
+   591→          avg_latency_ms?: number | null;
+   592→          last_check_at?: string | null;
+   593→          last_error?: string | null;
+   594→          metadata?: Json | null;
+   595→          created_at?: string;
+   596→          updated_at?: string;
+   597→        };
+   598→        Relationships: [];
+   599→      };
+   600→
+   601→      ai_usage: {
+   602→        Row: {
+   603→          id: Uuid;
+   604→          user_id: Uuid | null;
+   605→          org_id: Uuid | null;
+   606→          conversation_id: Uuid | null;
+   607→          message_id: Uuid | null;
+   608→          provider: string;
+   609→          model: string;
+   610→          input_tokens: number;
+   611→          output_tokens: number;
+   612→          total_tokens: number;
+   613→          cost_cents: number;
+   614→          latency_ms: number | null;
+   615→          feature: string;
+   616→          status: "success" | "error" | "timeout" | "rate_limited";
+   617→          error_message: string | null;
+   618→          created_at: string;
+   619→        };
+   620→        Insert: {
+   621→          id?: Uuid;
+   622→          user_id?: Uuid | null;
+   623→          org_id?: Uuid | null;
+   624→          conversation_id?: Uuid | null;
+   625→          message_id?: Uuid | null;
+   626→          provider: string;
+   627→          model: string;
+   628→          input_tokens?: number;
+   629→          output_tokens?: number;
+   630→          total_tokens?: number;
+   631→          cost_cents?: number;
+   632→          latency_ms?: number | null;
+   633→          feature?: string;
+   634→          status?: "success" | "error" | "timeout" | "rate_limited";
+   635→          error_message?: string | null;
+   636→          created_at?: string;
+   637→        };
+   638→        Update: {
+   639→          id?: Uuid;
+   640→          user_id?: Uuid | null;
+   641→          org_id?: Uuid | null;
+   642→          conversation_id?: Uuid | null;
+   643→          message_id?: Uuid | null;
+   644→          provider?: string;
+   645→          model?: string;
+   646→          input_tokens?: number;
+   647→          output_tokens?: number;
+   648→          total_tokens?: number;
+   649→          cost_cents?: number;
+   650→          latency_ms?: number | null;
+   651→          feature?: string;
+   652→          status?: "success" | "error" | "timeout" | "rate_limited";
+   653→          error_message?: string | null;
+   654→          created_at?: string;
+   655→        };
+   656→        Relationships: [];
+   657→      };
+   658→
+   659→      // ------------------------------------------------------------------
+   660→      // Phase 2: Authentication & User Management tables
+   661→      // (see supabase/migrations/0004_phase2_auth.sql)
+   662→      // ------------------------------------------------------------------
+   663→
+   664→      profiles: {
+   665→        Row: {
+   666→          id: Uuid;
+   667→          username: string | null;
+   668→          full_name: string | null;
+   669→          avatar_url: string | null;
+   670→          phone_number: string | null;
+   671→          country: string | null;
+   672→          time_zone: string;
+   673→          locale: string;
+   674→          bio: string | null;
+   675→          company: string | null;
+   676→          job_title: string | null;
+   677→          website: string | null;
+   678→          account_status:
+   679→            | "active"
+   680→            | "suspended"
+   681→            | "pending_verification"
+   682→            | "deleted";
+   683→          subscription_plan:
+   684→            | "free"
+   685→            | "starter"
+   686→            | "pro"
+   687→            | "business"
+   688→            | "enterprise";
+   689→          credits_balance: number;
+   690→          email_verified: boolean;
+   691→          created_at: string;
+   692→          updated_at: string;
+   693→        };
+   694→        Insert: {
+   695→          id: Uuid;
+   696→          username?: string | null;
+   697→          full_name?: string | null;
+   698→          avatar_url?: string | null;
+   699→          phone_number?: string | null;
+   700→          country?: string | null;
+   701→          time_zone?: string;
+   702→          locale?: string;
+   703→          bio?: string | null;
+   704→          company?: string | null;
+   705→          job_title?: string | null;
+   706→          website?: string | null;
+   707→          account_status?:
+   708→            | "active"
+   709→            | "suspended"
+   710→            | "pending_verification"
+   711→            | "deleted";
+   712→          subscription_plan?:
+   713→            | "free"
+   714→            | "starter"
+   715→            | "pro"
+   716→            | "business"
+   717→            | "enterprise";
+   718→          credits_balance?: number;
+   719→          email_verified?: boolean;
+   720→          created_at?: string;
+   721→          updated_at?: string;
+   722→        };
+   723→        Update: {
+   724→          id?: Uuid;
+   725→          username?: string | null;
+   726→          full_name?: string | null;
+   727→          avatar_url?: string | null;
+   728→          phone_number?: string | null;
+   729→          country?: string | null;
+   730→          time_zone?: string;
+   731→          locale?: string;
+   732→          bio?: string | null;
+   733→          company?: string | null;
+   734→          job_title?: string | null;
+   735→          website?: string | null;
+   736→          account_status?:
+   737→            | "active"
+   738→            | "suspended"
+   739→            | "pending_verification"
+   740→            | "deleted";
+   741→          subscription_plan?:
+   742→            | "free"
+   743→            | "starter"
+   744→            | "pro"
+   745→            | "business"
+   746→            | "enterprise";
+   747→          credits_balance?: number;
+   748→          email_verified?: boolean;
+   749→          created_at?: string;
+   750→          updated_at?: string;
+   751→        };
+   752→        Relationships: [];
+   753→      };
+   754→
+   755→      user_settings: {
+   756→        Row: {
+   757→          id: Uuid;
+   758→          theme: "light" | "dark" | "system";
+   759→          density: "comfortable" | "compact";
+   760→          notification_email: boolean;
+   761→          notification_push: boolean;
+   762→          notification_marketing: boolean;
+   763→          notification_security: boolean;
+   764→          notification_product_updates: boolean;
+   765→          privacy_profile_visible: boolean;
+   766→          privacy_activity_visible: boolean;
+   767→          privacy_show_in_search: boolean;
+   768→          two_factor_enabled: boolean;
+   769→          session_timeout_minutes: number;
+   770→          created_at: string;
+   771→          updated_at: string;
+   772→        };
+   773→        Insert: {
+   774→          id: Uuid;
+   775→          theme?: "light" | "dark" | "system";
+   776→          density?: "comfortable" | "compact";
+   777→          notification_email?: boolean;
+   778→          notification_push?: boolean;
+   779→          notification_marketing?: boolean;
+   780→          notification_security?: boolean;
+   781→          notification_product_updates?: boolean;
+   782→          privacy_profile_visible?: boolean;
+   783→          privacy_activity_visible?: boolean;
+   784→          privacy_show_in_search?: boolean;
+   785→          two_factor_enabled?: boolean;
+   786→          session_timeout_minutes?: number;
+   787→          created_at?: string;
+   788→          updated_at?: string;
+   789→        };
+   790→        Update: {
+   791→          id?: Uuid;
+   792→          theme?: "light" | "dark" | "system";
+   793→          density?: "comfortable" | "compact";
+   794→          notification_email?: boolean;
+   795→          notification_push?: boolean;
+   796→          notification_marketing?: boolean;
+   797→          notification_security?: boolean;
+   798→          notification_product_updates?: boolean;
+   799→          privacy_profile_visible?: boolean;
+   800→          privacy_activity_visible?: boolean;
+   801→          privacy_show_in_search?: boolean;
+   802→          two_factor_enabled?: boolean;
+   803→          session_timeout_minutes?: number;
+   804→          created_at?: string;
+   805→          updated_at?: string;
+   806→        };
+   807→        Relationships: [];
+   808→      };
+   809→
+   810→      user_sessions: {
+   811→        Row: {
+   812→          id: Uuid;
+   813→          user_id: Uuid;
+   814→          session_token_hash: string | null;
+   815→          user_agent: string | null;
+   816→          ip_address: string | null;
+   817→          device_type: string | null;
+   818→          os: string | null;
+   819→          browser: string | null;
+   820→          location: string | null;
+   821→          is_current: boolean;
+   822→          last_active_at: string;
+   823→          expires_at: string | null;
+   824→          revoked_at: string | null;
+   825→          created_at: string;
+   826→        };
+   827→        Insert: {
+   828→          id?: Uuid;
+   829→          user_id: Uuid;
+   830→          session_token_hash?: string | null;
+   831→          user_agent?: string | null;
+   832→          ip_address?: string | null;
+   833→          device_type?: string | null;
+   834→          os?: string | null;
+   835→          browser?: string | null;
+   836→          location?: string | null;
+   837→          is_current?: boolean;
+   838→          last_active_at?: string;
+   839→          expires_at?: string | null;
+   840→          revoked_at?: string | null;
+   841→          created_at?: string;
+   842→        };
+   843→        Update: {
+   844→          id?: Uuid;
+   845→          user_id?: Uuid;
+   846→          session_token_hash?: string | null;
+   847→          user_agent?: string | null;
+   848→          ip_address?: string | null;
+   849→          device_type?: string | null;
+   850→          os?: string | null;
+   851→          browser?: string | null;
+   852→          location?: string | null;
+   853→          is_current?: boolean;
+   854→          last_active_at?: string;
+   855→          expires_at?: string | null;
+   856→          revoked_at?: string | null;
+   857→          created_at?: string;
+   858→        };
+   859→        Relationships: [];
+   860→      };
+   861→
+   862→      notifications: {
+   863→        Row: {
+   864→          id: Uuid;
+   865→          user_id: Uuid;
+   866→          type: string;
+   867→          title: string;
+   868→          message: string;
+   869→          action_url: string | null;
+   870→          action_label: string | null;
+   871→          is_read: boolean;
+   872→          metadata: Json | null;
+   873→          created_at: string;
+   874→          read_at: string | null;
+   875→        };
+   876→        Insert: {
+   877→          id?: Uuid;
+   878→          user_id: Uuid;
+   879→          type: string;
+   880→          title: string;
+   881→          message: string;
+   882→          action_url?: string | null;
+   883→          action_label?: string | null;
+   884→          is_read?: boolean;
+   885→          metadata?: Json | null;
+   886→          created_at?: string;
+   887→          read_at?: string | null;
+   888→        };
+   889→        Update: {
+   890→          id?: Uuid;
+   891→          user_id?: Uuid;
+   892→          type?: string;
+   893→          title?: string;
+   894→          message?: string;
+   895→          action_url?: string | null;
+   896→          action_label?: string | null;
+   897→          is_read?: boolean;
+   898→          metadata?: Json | null;
+   899→          created_at?: string;
+   900→          read_at?: string | null;
+   901→        };
+   902→        Relationships: [];
+   903→      };
+   904→
+   905→      activity_logs: {
+   906→        Row: {
+   907→          id: Uuid;
+   908→          user_id: Uuid | null;
+   909→          event_type: string;
+   910→          severity: "debug" | "info" | "warn" | "error" | "critical";
+   911→          ip_address: string | null;
+   912→          user_agent: string | null;
+   913→          metadata: Json | null;
+   914→          created_at: string;
+   915→        };
+   916→        Insert: {
+   917→          id?: Uuid;
+   918→          user_id?: Uuid | null;
+   919→          event_type: string;
+   920→          severity?: "debug" | "info" | "warn" | "error" | "critical";
+   921→          ip_address?: string | null;
+   922→          user_agent?: string | null;
+   923→          metadata?: Json | null;
+   924→          created_at?: string;
+   925→        };
+   926→        Update: {
+   927→          id?: Uuid;
+   928→          user_id?: Uuid | null;
+   929→          event_type?: string;
+   930→          severity?: "debug" | "info" | "warn" | "error" | "critical";
+   931→          ip_address?: string | null;
+   932→          user_agent?: string | null;
+   933→          metadata?: Json | null;
+   934→          created_at?: string;
+   935→        };
+   936→        Relationships: [];
+   937→      };
+   938→
+   939→      account_deletion_requests: {
+   940→        Row: {
+   941→          id: Uuid;
+   942→          user_id: Uuid;
+   943→          request_type: "data_export" | "account_deletion";
+   944→          status:
+   945→            | "pending"
+   946→            | "processing"
+   947→            | "completed"
+   948→            | "failed"
+   949→            | "cancelled";
+   950→          download_url: string | null;
+   951→          expires_at: string | null;
+   952→          completed_at: string | null;
+   953→          created_at: string;
+   954→          updated_at: string;
+   955→        };
+   956→        Insert: {
+   957→          id?: Uuid;
+   958→          user_id: Uuid;
+   959→          request_type: "data_export" | "account_deletion";
+   960→          status?:
+   961→            | "pending"
+   962→            | "processing"
+   963→            | "completed"
+   964→            | "failed"
+   965→            | "cancelled";
+   966→          download_url?: string | null;
+   967→          expires_at?: string | null;
+   968→          completed_at?: string | null;
+   969→          created_at?: string;
+   970→          updated_at?: string;
+   971→        };
+   972→        Update: {
+   973→          id?: Uuid;
+   974→          user_id?: Uuid;
+   975→          request_type?: "data_export" | "account_deletion";
+   976→          status?:
+   977→            | "pending"
+   978→            | "processing"
+   979→            | "completed"
+   980→            | "failed"
+   981→            | "cancelled";
+   982→          download_url?: string | null;
+   983→          expires_at?: string | null;
+   984→          completed_at?: string | null;
+   985→          created_at?: string;
+   986→          updated_at?: string;
+   987→        };
+   988→        Relationships: [];
+   989→      };
+   990→
+   991→      linked_accounts: {
+   992→        Row: {
+   993→          id: Uuid;
+   994→          user_id: Uuid;
+   995→          provider: string;
+   996→          provider_account_id: string | null;
+   997→          provider_email: string | null;
+   998→          metadata: Json | null;
+   999→          created_at: string;
+  1000→        };
+  1001→        Insert: {
+  1002→          id?: Uuid;
+  1003→          user_id: Uuid;
+  1004→          provider: string;
+  1005→          provider_account_id?: string | null;
+  1006→          provider_email?: string | null;
+  1007→          metadata?: Json | null;
+  1008→          created_at?: string;
+  1009→        };
+  1010→        Update: {
+  1011→          id?: Uuid;
+  1012→          user_id?: Uuid;
+  1013→          provider?: string;
+  1014→          provider_account_id?: string | null;
+  1015→          provider_email?: string | null;
+  1016→          metadata?: Json | null;
+  1017→          created_at?: string;
+  1018→        };
+  1019→        Relationships: [];
+  1020→      };
+  1021→    };
+  1022→    Views: Record<string, never>;
+  1023→    Functions: {
+  1024→      handle_new_user: {
+  1025→        Args: Record<string, never>;
+  1026→        Returns: undefined;
+  1027→      };
+  1028→    };
+  1029→    Enums: Record<string, never>;
+  1030→  };
+  1031→}
+  1032→
+  1033→/** Convenience alias for a public-table row shape. */
+  1034→export type Tables<T extends keyof Database["public"]["Tables"]> =
+  1035→  Database["public"]["Tables"][T]["Row"];
+  1036→
+  1037→/** Convenience alias for a public-table insert shape. */
+  1038→export type TablesInsert<T extends keyof Database["public"]["Tables"]> =
+  1039→  Database["public"]["Tables"][T]["Insert"];
+  1040→
+  1041→/** Convenience alias for a public-table update shape. */
+  1042→export type TablesUpdate<T extends keyof Database["public"]["Tables"]> =
+  1043→  Database["public"]["Tables"][T]["Update"];
+  1044→

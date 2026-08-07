@@ -1,0 +1,300 @@
+  1343→    limit, offset).
+  1344→  * `history/[id]/route.ts` — GET single + DELETE hard-delete.
+  1345→  * `models/route.ts` — GET catalog (filtered to configured providers).
+  1346→  * `styles/route.ts` — GET curated styles.
+  1347→  * `enhance/route.ts` — POST enhance (re-run with revised prompt).
+  1348→  * `upscale/route.ts` — POST upscale (1.5x larger size, hd quality).
+  1349→  * `remove-bg/route.ts` — POST remove background (routes through Replicate when
+  1350→    configured, falls back to prompt-prefix regeneration).
+  1351→  * `upload/route.ts` — POST multipart file upload to ai-assets bucket.
+  1352→  * `usage/route.ts` — GET aggregate usage stats with optional date range.
+  1353→  * All routes follow the thin pattern: `requireAuth() → validateInput() → service.X()
+  1354→    → apiSuccess/apiError`.
+  1355→
+  1356→- Created `src/hooks/use-images.ts`:
+  1357→  * `imageKeys` query-key factory.
+  1358→  * `useImageHistory`, `useImageDetail`, `useImageModels`, `useImageStyles`,
+  1359→    `useImageUsage` (queries).
+  1360→  * `useGenerateImage`, `useDeleteImage`, `useUploadImage` (mutations).
+  1361→  * `useEnhanceImage`, `useUpscaleImage`, `useRemoveImageBackground` (edit mutations).
+  1362→  * All invalidate the relevant query keys after a successful write.
+  1363→
+  1364→- Created UI components in `src/components/image/`:
+  1365→  * `model-picker.tsx` — shadcn Select grouped by provider (label + provider + model_id).
+  1366→  * `style-picker.tsx` — shadcn Select grouped by category.
+  1367→  * `image-studio.tsx` — prompt textarea, negative prompt, model picker, style picker,
+  1368→    size picker, quality picker, generate button, result preview. Uses
+  1369→    useGenerateImage mutation.
+  1370→  * `image-gallery.tsx` — responsive grid (2/3/4 cols) of past generations with a
+  1371→    click-to-view Dialog lightbox showing the full image + metadata + delete + edit
+  1372→    controls.
+  1373→  * `image-editor.tsx` — enhance / upscale / remove-bg action buttons.
+  1374→  * `image-view.tsx` — top-level container with Tabs (Generate, Gallery, Models, Usage).
+  1375→    Models tab shows provider-grouped catalog. Usage tab shows stat cards + per-provider
+  1376→    breakdown.
+  1377→  * `index.ts` — barrel.
+  1378→
+  1379→- Wired into dashboard:
+  1380→  * `src/components/dashboard/section-router.tsx` — added `import { ImageView }` +
+  1381→    `if (active === "image") return <ImageView />;` (placed after chat, before employees).
+  1382→  * `src/components/dashboard/nav-config.ts` — removed `comingSoon: true` from the image
+  1383→    nav item (the image section is now live).
+  1384→
+  1385→- Verification:
+  1386→  * `bun run typecheck` → 0 image-related errors. The 63 total tsc errors are ALL in
+  1387→    `src/lib/voice/`, `src/lib/workspace/`, `src/components/voice/`, and
+  1388→    `src/lib/ai/voice-providers/` — modules owned by other agents that were already
+  1389→    broken before this work began.
+  1390→  * `bun run lint` → 0 image-related errors. The 5 remaining lint errors are all in
+  1391→    `src/components/workspace/document-editor.tsx` (refs-during-render rule) and
+  1392→    `src/components/workspace/folder-tree.tsx` (aria-selected warning) — outside my
+  1393→    ownership area.
+  1394→
+  1395→Stage Summary:
+  1396→- Phase 4 AI Image Generation is fully rebuilt and integrated.
+  1397→- 1 SQL migration (5 new tables + RLS + indexes + triggers + seeds).
+  1398→- 4 AI image library modules (image-base, image-types, image-registry, image-manager).
+  1399→- 6 image providers (OpenAI DALL·E, Stability, Replicate, Fal, Ideogram, Google Imagen).
+  1400→- 8 image service library modules (types, image-service, catalog, history, usage,
+  1401→  upload, client, index).
+  1402→- 1 validation module (image.ts) with 6 Zod schemas.
+  1403→- 10 API routes under /api/images/ (generate, history, history/[id], models, styles,
+  1404→  enhance, upscale, remove-bg, upload, usage).
+  1405→- 1 TanStack Query hooks file (use-images.ts) with 8 hooks.
+  1406→- 6 UI components in src/components/image/ + barrel.
+  1407→- 2 dashboard files modified (section-router.tsx wired ImageView; nav-config.ts removed
+  1408→  comingSoon flag).
+  1409→- Production-ready: all server files start with `import "server-only"`, all API routes
+  1410→  use the thin pattern, all providers read API keys from process.env, RLS is
+  1411→  workspace-member-aware, storage uses the existing ai-assets bucket with namespaced
+  1412→  paths, usage rollup is best-effort (never blocks a successful generation).
+  1413→
+  1414→---
+  1415→Task ID: REBUILD-P9A
+  1416→Agent: general-purpose (sub agent)
+  1417→Task: Rebuild Phase 9A (Automation Engine) — lost in environment reset.
+  1418→
+  1419→Work Log:
+  1420→- Read `worklog.md`, `src/lib/workspace/core.ts`, `src/lib/chat/chat-service.ts`, `src/lib/supabase/types.ts`, and the Phase 9C employee patterns (migration 0014, employee-service, validation/employees, use-employees hook, API routes, components) as the canonical reference for a Phase 9 workspace-scoped feature.
+  1421→- Authored `supabase/migrations/0011_phase9a_automation.sql` — 9 tables (`workflows`, `workflow_triggers`, `workflow_actions`, `workflow_runs`, `workflow_logs`, `workflow_variables`, `scheduled_jobs`, `automation_templates`, `webhook_endpoints`) with default-deny RLS (workspace-member policies backed by the shared `public.is_workspace_member` SECURITY DEFINER from 0009), FKs to `workspaces` + `auth.users`, indexes, `set_updated_at` triggers, FTS indexes on `workflows` + `automation_templates`, plus 5 seeded featured templates (Welcome Email, Daily Standup Digest, Lead Routing, Content Pipeline, Onboarding Sequence).
+  1422→- Extended `src/lib/supabase/types.ts` with the 9 Phase 9A table types (`Row` / `Insert` / `Update` for each, mirroring the SQL CHECK constraints on status / trigger-type / run-status / log-level / variable-type enums).
+  1423→- Built `src/lib/automation/` library (12 files):
+  1424→  - `types.ts` — client-safe domain types, DTOs, executor context + handler contract, dashboard summary.
+  1425→  - `service.ts` — `AutomationService`: createWorkflow, listWorkflows, getWorkflow, updateWorkflow, deleteWorkflow, pauseWorkflow, resumeWorkflow, archiveWorkflow, triggers/actions/variables CRUD, runs management (startRun, retryRun, cancelRun, listRuns, getRun, listLogs), templates (list/create/install), webhooks (list/create), dashboard aggregate.
+  1426→  - `executor.ts` — `WorkflowExecutor`: loads run + actions + variables, marks `running`, walks actions in order, resolves `{{...}}` placeholders via `VariableResolver`, dispatches to `ActionHandler`s, captures outputs, logs via `workflow_logs`, marks `completed`/`failed`.
+  1427→  - `dispatcher.ts` — `TriggerDispatcher`: `dispatchEvent(event, payload)` finds matching `event` triggers + active workflows, inserts `workflow_runs`, enqueues on the background queue.
+  1428→  - `scheduler.ts` — `Scheduler.checkScheduledJobs(now)`: finds due `scheduled_jobs`, inserts runs, bumps `last_run_at` + `next_run_at` (cron parser + interval support).
+  1429→  - `registry.ts` — `ActionRegistry`: built-in handlers for `send_email`, `http_request`, `create_record`, `update_record`, `log`, `delay`, `transform`.
+  1430→  - `evaluator.ts` — `ConditionEvaluator`: if/else + switch with deep-equality + 13 operators (eq/ne/gt/gte/lt/lte/contains/startsWith/endsWith/in/notNull/isNull/truthy/falsy) and AND/OR/NOT groups.
+  1431→  - `resolver.ts` — `VariableResolver`: resolves `{{key}}`, `{{a.b.c}}`, `{{outputs.N.x}}`, `{{payload.event}}` against the run's variable scope.
+  1432→  - `queue.ts` — `RunQueue`: in-process `setImmediate` background queue with concurrency cap + completion listeners.
+  1433→  - `trigger-dispatcher.ts` — `WebhookDispatcher`: PUBLIC entry point; verifies HMAC-SHA256 signature when a `secret` is set, looks up the workflow via the unique `url_slug`, inserts a run, enqueues.
+  1434→  - `client.ts` — client-safe barrel (types only).
+  1435→  - `index.ts` — server-only barrel re-exporting everything.
+  1436→- Authored `src/lib/validation/automation.ts` — Zod schemas for create/update workflow, list query, triggers, actions, variables, templates, runs, logs, webhooks.
+  1437→- Created 13 API routes under `src/app/api/automation/`:
+  1438→  - `workflows/route.ts` — GET + POST (workspaceId query param).
+  1439→  - `workflows/[id]/route.ts` — GET + PATCH + DELETE.
+  1440→  - `workflows/[id]/triggers/route.ts` — GET + POST.
+  1441→  - `workflows/[id]/actions/route.ts` — GET + POST.
+  1442→  - `workflows/[id]/variables/route.ts` — GET + POST.
+  1443→  - `workflows/[id]/runs/route.ts` — GET + POST (start manual run).
+  1444→  - `workflows/[id]/runs/[runId]/route.ts` — GET.
+  1445→  - `workflows/[id]/runs/[runId]/logs/route.ts` — GET.
+  1446→  - `runs/[runId]/retry/route.ts` — POST.
+  1447→  - `runs/[runId]/cancel/route.ts` — POST.
+  1448→  - `templates/route.ts` — GET (public browse) + POST (auth).
+  1449→  - `dashboard/route.ts` — GET (workspace dashboard stats).
+  1450→  - `webhooks/[webhookUrl]/route.ts` — POST, PUBLIC (no auth; verified via URL slug + optional HMAC).
+  1451→  - Plus `_helpers.ts` (server-only `resolveWorkspaceId` + `parseJsonBody`).
+  1452→- Built `src/components/automation/` UI (6 components + barrel):
+  1453→  - `automation-view.tsx` — tabbed container (Workflows / Runs / Templates / Dashboard) with a workspace switcher.
+  1454→  - `workflow-list.tsx` — searchable, filterable list with status badges + per-row "Run now" button.
+  1455→  - `run-list.tsx` — recent runs with status icons, duration, logs popover, retry/cancel buttons.
+  1456→  - `variable-manager.tsx` — add variables (key/value/type/secret) + list current variables.
+  1457→  - `template-library.tsx` — searchable grid of automation templates with install button.
+  1458→  - `automation-dashboard.tsx` — KPI tiles + recent runs + top-workflows leaderboard.
+  1459→  - `index.ts` — barrel.
+  1460→- Created `src/hooks/use-automation.ts` — TanStack Query wrappers for every automation endpoint + a local-state `useAutomationStore` hook for active tab / selected workflow / active run.
+  1461→- Wired into the dashboard:
+  1462→  - `src/components/dashboard/nav-config.ts` — added `"automation"` to `SectionId`, imported `Zap` from lucide-react, added the nav item under "AI Tools" with label "Automation".
+  1463→  - `src/components/dashboard/section-router.tsx` — added the `AutomationView` import + an `if (active === "automation") return <AutomationView />;` branch + the matching `SECTION_TITLE` entry.
+  1464→- Verification: ran `bun run typecheck` (went from 1041 errors pre-changes to 2 — the 2 remaining are pre-existing errors in `src/lib/business/{invoice,report}-service.ts` from another in-flight Phase, NOT in any Phase 9A file). Ran `bun run lint` — zero warnings, zero errors.
+  1465→
+  1466→Stage Summary:
+  1467→- Phase 9A Automation Engine fully rebuilt and wired in:
+  1468→  - 1 migration (9 tables, RLS, indexes, triggers, 5 seed templates).
+  1469→  - 9 new table types added to `src/lib/supabase/types.ts`.
+  1470→  - 12-file server library (`src/lib/automation/`) with service, executor, dispatcher, scheduler, registry, evaluator, resolver, queue, webhook receiver, types, client + server barrels.
+  1471→  - Zod validation module (`src/lib/validation/automation.ts`).
+  1472→  - 13 API routes under `src/app/api/automation/` (12 authed + 1 PUBLIC webhook receiver).
+  1473→  - 6 UI components + barrel under `src/components/automation/`.
+  1474→  - TanStack Query hooks (`src/hooks/use-automation.ts`).
+  1475→  - Dashboard nav + section-router wired (`"automation"` section with `Zap` icon).
+  1476→- All server files import `"server-only"`; client files import only types from `@/lib/automation/client`.
+  1477→- API routes are thin (validate → service → `apiSuccess`/`apiError`).
+  1478→- Webhook endpoint is PUBLIC (no auth gate); verifies via URL slug + optional HMAC-SHA256 signature over the raw body.
+  1479→- Webhook secrets auto-generated with `crypto.randomBytes(24)`; URL slugs auto-derived from workflow name + 4 random hex bytes.
+  1480→- Background execution uses `setImmediate` + an in-process `RunQueue` (max-concurrent=8, configurable); the UI polls the runs endpoint every 3s while a run is in flight.
+  1481→- Scheduler supports a minimal cron subset (minute/hour/dom/month/dow with `*` / integer / `*/N` step) plus `intervalMinutes` for simple recurrences.
+  1482→- Built-in action handlers cover `send_email`, `http_request` (real fetch with timeout), `create_record`, `update_record`, `log`, `delay`, `transform` (pick/noop). Custom handlers can be registered at runtime via `ActionRegistry.register`.
+  1483→- Variable resolver supports `{{key}}`, `{{a.b.c}}`, `{{outputs.N.x}}`, `{{payload.event}}`, `{{variables.key}}` with graceful pass-through (unknown placeholders left in place).
+  1484→- Condition evaluator supports if/else + switch with 13 operators and AND/OR/NOT groups.
+  1485→- Pre-existing 2 typecheck errors are in `src/lib/business/*` (a different in-flight Phase) — left untouched per the task scope.
+  1486→
+  1487→---
+  1488→Task ID: REBUILD-P9B
+  1489→Agent: general-purpose (Phase 9B rebuild)
+  1490→Task: Rebuild Phase 9B (Visual Workflow Builder) — lost in environment reset.
+  1491→
+  1492→Work Log:
+  1493→- Read worklog.md to understand prior context (Phases 1-9C shipped).
+  1494→- Studied existing patterns:
+  1495→  * `src/lib/workspace/core.ts` — `assertMember` / `assertRole` / `assertCanWrite` helpers (used in the BuilderService).
+  1496→  * `src/lib/chat/chat-service.ts` — server-only service pattern (`import "server-only"`, factory `createXService()`).
+  1497→  * `src/lib/employees/employee-service.ts` — admin-client service pattern + catalog registry pattern.
+  1498→  * `src/lib/employees/skill-registry.ts` — client-safe catalog with `NodeRegistry` class for lookup.
+  1499→  * `src/lib/workspace/client.ts` + `index.ts` — client-safe vs server-only barrel pattern.
+  1500→  * `src/app/api/workspace/workspaces/route.ts` — thin API route pattern (`requireAuth → validateInput → service.X → apiSuccess/apiError`).
+  1501→  * `src/lib/auth/api-helpers.ts` — `requireAuth`, `apiSuccess`, `apiError`.
+  1502→  * `src/lib/supabase/types.ts` — Row/Insert/Update type pattern.
+  1503→  * `src/components/dashboard/nav-config.ts` + `section-router.tsx` — dashboard wiring pattern.
+  1504→
+  1505→- Created `supabase/migrations/0012_phase9b_builder.sql` (7 new tables):
+  1506→  * `workflow_nodes` — workspace_id, workflow_id, node_type CHECK('trigger'|'action'|'condition'|'transform'|'ai'|'integration'|'output'), node_key, label, position jsonb {x,y}, config jsonb, is_enabled. Unique (workspace_id, workflow_id, node_key).
+  1507→  * `workflow_edges` — workspace_id, workflow_id, source_node_id FK→nodes, target_node_id FK→nodes, source_port, target_port, label, condition jsonb.
+  1508→  * `workflow_layouts` — workflow_id (unique), layout jsonb (carries workspaceId for RLS), viewport jsonb {zoom,x,y}.
+  1509→  * `workflow_comments` — workspace_id, workflow_id, author_id FK→auth.users, body, position jsonb, resolved bool.
+  1510→  * `workflow_collaboration` — workflow_id, user_id FK→auth.users (unique per pair), cursor jsonb, selected_nodes text[], last_active.
+  1511→  * `workflow_debug_sessions` — workspace_id, workflow_id, status CHECK('idle'|'running'|'paused'|'completed'), current_node_id FK→nodes, variables jsonb, log jsonb, started_at, completed_at.
+  1512→  * `template_categories` — name, slug (unique), description, icon, sort_order, is_active. Public read for active rows.
+  1513→  * All tables: RLS enabled, default-deny. workspace_* tables gated via `is_workspace_member(workspace_id, auth.uid())`. layouts table gated via `is_workspace_member((layout->>'workspaceId')::uuid, auth.uid())`. collaboration is per-user (user_id = auth.uid()).
+  1514→  * Indexes on (workspace_id, workflow_id), (source_node_id), (target_node_id), (status), (is_active, sort_order).
+  1515→  * `set_updated_at` triggers on 6 tables (reusing the shared function from 0003).
+  1516→  * Seeded 8 template categories (Automation, AI Pipelines, Integrations, Data, Notifications, Marketing, Customer Ops, DevOps).
+  1517→
+  1518→- Updated `src/lib/supabase/types.ts` — appended full Row/Insert/Update type definitions for all 7 new tables before the closing `};` of the Tables object. Mirrors the SQL CHECK constraints as TypeScript literal unions.
+  1519→
+  1520→- Created the builder library in `src/lib/builder/`:
+  1521→  * `types.ts` — client-safe types (NodeType, DebugStatus, CanvasPoint, Viewport, NodeDefinition, NodeConfigField, WorkflowGraph, SaveWorkflowInput, WorkflowNodeInput, WorkflowEdgeInput, WorkflowLayoutInput, ValidationIssue, ValidationResult, PreviewResult, DebugLogEntry, CreateCommentInput, UpdateCommentInput, UpsertPresenceInput, ImportResult, WorkflowExport v1, Json). Row aliases re-export Tables<'workflow_nodes'> etc.
+  1522→  * `node-definitions.ts` — catalog of exactly 71 node types organized by category:
+  1523→    - triggers (4): schedule, webhook, event, manual
+  1524→    - actions (9): send_email, http_request, create_record, update_record, delete_record, send_notification, delay, parallel, merge
+  1525→    - conditions (3): if, switch, filter
+  1526→    - transforms (4): map, reduce, format, parse
+  1527→    - ai (5): ai_chat, generate_image, transcribe, analyze, ai_embed
+  1528→    - integrations (38): slack, github, stripe, twilio, sendgrid, mailchimp, hubspot, salesforce, notion, airtable, linear, jira, asana, trello, discord, telegram, whatsapp, shopify, webflow, vercel, netlify, supabase, s3, gdrive, gsheets, calendar, zoom, calendly, intercom, zendesk, pagerduty, datadog, segment, mixpanel, amplitude, twilio_voice, openai_fine_tune, huggingface
+  1529→    - outputs (8): webhook_response, file_output, database_write, log_output, send_to_topic, queue_task, sse_response, end
+  1530→    - Each definition carries: type, label, description, icon (Lucide name string), category, inputs, outputs, isStart, defaultConfig, configSchema (typed field array driving the config panel UI).
+  1531→    - Exposes `NODE_DEFINITIONS` array, `NODE_CATEGORY_LABELS` + `NODE_CATEGORY_ORDER` for grouping, `NodeRegistry` class (list/find/listByCategory/listStartNodes/categories/size), `nodeRegistry` singleton, `NODE_CATALOG_VERSION = 1`.
+  1532→  * `builder-service.ts` — `BuilderService` class + `createBuilderService()` (server client, RLS-enforced) + `createBuilderServiceWith(supabase)` factories. Methods: saveWorkflow (atomic replace graph), loadWorkflow, listNodes, addNodes, listEdges, addEdges, getLayout, saveLayout, validateWorkflow (pure-graph), previewWorkflow (pure-graph in-memory simulation), exportWorkflow, importWorkflow, listComments, createComment, updateComment, listPresence, upsertPresence, getDebugSession, startDebug, updateDebugStatus, appendDebugLog, listTemplateCategories, getNodeDefinitions. Uses `assertCanWrite` from `@/lib/workspace/core` for membership checks.
+  1533→  * `client.ts` — client-safe barrel re-exporting `./types` + `./node-definitions`.
+  1534→  * `index.ts` — server-only barrel re-exporting `./client` + the BuilderService factory.
+  1535→
+  1536→- Created `src/lib/validation/builder.ts`:
+  1537→  * Zod schemas: nodeTypeSchema, debugStatusSchema, nodeInputSchema, edgeInputSchema, layoutInputSchema, saveWorkflowSchema, addNodesSchema, addEdgesSchema, saveLayoutSchema, previewSchema, validateSchema, debugActionSchema, createCommentSchema, updateCommentSchema, upsertPresenceSchema, exportNodeSchema, exportEdgeSchema, exportLayoutSchema, importWorkflowSchema (v1).
+  1538→  * All schemas strict + with inferred types.
+  1539→
+  1540→- Created 14 API routes under `src/app/api/builder/`:
+  1541→  * `workflows/[id]/nodes/route.ts` — GET list + POST bulk-insert nodes.
+  1542→  * `workflows/[id]/edges/route.ts` — GET list + POST bulk-insert edges.
+  1543→  * `workflows/[id]/layout/route.ts` — GET + POST (upsert layout).
+  1544→  * `workflows/[id]/save/route.ts` — GET load whole graph + POST save entire graph (atomic replace).
+  1545→  * `workflows/[id]/preview/route.ts` — POST run in-memory preview.
+  1546→  * `workflows/[id]/validate/route.ts` — POST validate graph.
+  1547→  * `workflows/[id]/debug/route.ts` — GET latest session + POST start/pause/resume/stop.
+  1548→  * `workflows/[id]/comments/route.ts` — GET list + POST create.
+  1549→  * `workflows/[id]/comments/[commentId]/route.ts` — PATCH (resolve / edit body / move position).
+  1550→  * `workflows/[id]/export/route.ts` — GET export JSON.
+  1551→  * `workflows/[id]/import/route.ts` — POST import JSON (workflow_id rewritten from path so callers can clone).
+  1552→  * `workflows/[id]/presence/route.ts` — GET caller's presence + POST upsert presence.
+  1553→  * `template-categories/route.ts` — GET list active categories.
+  1554→  * `node-definitions/route.ts` — GET list all 71 node definitions (optional ?category filter).
+  1555→  * All routes follow the thin pattern: `requireAuth → validateInput → service.X → apiSuccess/apiError`.
+  1556→
+  1557→- Created `src/hooks/use-builder.ts`:
+  1558→  * `builderKeys` query-key factory (graph, nodes, edges, layout, comments, debug, presence, catalog, templateCategories).
+  1559→  * `apiRequest` + `unwrapError` helpers (relative URLs + credentials: include + ApiResponse envelope parsing).
+  1560→  * 14 TanStack Query hooks: useWorkflowGraph, useSaveWorkflow, useNodes, useAddNodes, useEdges, useAddEdges, useLayout, useSaveLayout, useValidateWorkflow, usePreviewWorkflow, useDebugSession (polls every 3s while running/paused), useMutateDebugSession, useComments, useCreateComment, useUpdateComment, useExportWorkflow, useImportWorkflow, usePresence, useUpsertPresence, useNodeDefinitions, useTemplateCategories.
+  1561→  * All mutations invalidate the relevant query keys after a successful write.
+  1562→
+  1563→- Created 7 UI components in `src/components/builder/`:
+  1564→  * `node-palette.tsx` — left sidebar with searchable, category-grouped list of node definitions. Each item is `useDraggable` (from @dnd-kit) so the user can drag node types onto the canvas.
+  1565→  * `workflow-canvas.tsx` — div-based, pan + zoom canvas. Renders every node as an absolutely-positioned card (with category-aware border color) + SVG edges between connected nodes' ports. Uses @dnd-kit's `useDroppable` so palette drops land on the canvas. Native pointer events handle node dragging + canvas panning. Zoom controls (bottom-right). Mouse wheel + ctrl/cmd zooms; shift+drag pans.
+  1566→  * `config-panel.tsx` — right sidebar. Renders a form driven by the selected node's `configSchema` (text/textarea/number/boolean/select/json/url/email fields → shadcn inputs). Includes label + node key + enabled toggle + delete button. FieldRenderer component maps each field type to the right input control.
+  1567→  * `debug-console.tsx` — debug session status badge (idle/running/paused/completed) + start/pause/resume/stop buttons + scrollable log entries list. Polls the latest session every 3s while running or paused.
+  1568→  * `version-manager.tsx` — shows last-saved timestamp, node/edge counts, export-to-JSON download button, import-from-JSON upload button (round-trips through WorkflowExport v1).
+  1569→  * `comments-panel.tsx` — comments list with create-textarea + resolve-toggle per comment.
+  1570→  * `builder-view.tsx` — top-level container. Owns active workspaceId, workflowId, in-memory graph state (nodes, edges, viewport), selected node, and the right-panel tab. Wraps everything in a `DndContext` (PointerSensor with distance:5 activation). Top bar: workspace Select + workflow id Input + Save / Validate / Preview buttons. Validation + Preview result banners. 3-pane layout: NodePalette (left, hidden on mobile) + WorkflowCanvas (center, flex-1) + tabbed right sidebar (Configure / Debug / Comments / Versions).
+  1571→  * `index.ts` — barrel exporting every builder component.
+  1572→
+  1573→- Wired into dashboard:
+  1574→  * `src/components/dashboard/nav-config.ts`:
+  1575→    * Added `Workflow` to the lucide-react imports.
+  1576→    * Added `"workflow-builder"` to the `SectionId` union.
+  1577→    * Added a new `{ id: "workflow-builder", label: "Workflow Builder", icon: Workflow, description: "Visual canvas for designing multi-step workflows — drag, connect, and debug nodes" }` item to the "AI Tools" group, placed right after the `automation` entry. NOT marked `comingSoon` — the section is fully built.
+  1578→  * `src/components/dashboard/section-router.tsx`:
+  1579→    * Imported `BuilderView` from `@/components/builder`.
+  1580→    * Added a `"workflow-builder"` entry to the `SECTION_TITLE` lookup map.
+  1581→    * Added an explicit `if (active === "workflow-builder") return <BuilderView />;` case in `SectionContent`, placed AFTER the `automation` case.
+  1582→
+  1583→- Verification:
+  1584→  * `bunx tsc --noEmit` → 0 builder-related errors. The 2 remaining total tsc errors are pre-existing in `src/lib/business/invoice-service.ts` and `src/lib/business/report-service.ts` (out of scope, pre-existing before Phase 9B).
+  1585→  * `bunx eslint src/lib/builder src/lib/validation/builder.ts src/app/api/builder src/components/builder src/hooks/use-builder.ts` → exit 0, 0 errors / 0 warnings.
+  1586→  * `bun run lint` (entire project) → 0 errors / 0 warnings.
+  1587→
+  1588→Stage Summary:
+  1589→- Phase 9B Visual Workflow Builder is fully rebuilt and integrated.
+  1590→- 1 SQL migration (`0012_phase9b_builder.sql`) — 7 new tables, RLS on all 7 (default-deny via `is_workspace_member`), 14 indexes, 6 updated_at triggers, 8 seeded template categories.
+  1591→- 5 builder library modules under `src/lib/builder/` (types, builder-service, node-definitions, client, index). The catalog ships exactly 71 node types (4 triggers + 9 actions + 3 conditions + 4 transforms + 5 ai + 38 integrations + 8 outputs) with full configSchema definitions for the UI.
+  1592→- 1 validation module (`builder.ts`) with 17 Zod schemas.
+  1593→- 14 API routes / 24 handlers under `src/app/api/builder/` covering nodes, edges, layout, save (whole graph), preview, validate, debug (start/pause/resume/stop), comments (list/create/update), export, import, presence, template-categories, node-definitions.
+  1594→- 7 UI components + barrel under `src/components/builder/`: builder-view (3-pane container with DndContext), workflow-canvas (div-based pan/zoom canvas with SVG edges + @dnd-kit droppable), node-palette (searchable + draggable items), config-panel (form-driven by configSchema), debug-console (session status + log), version-manager (export/import + counts), comments-panel (list + create + resolve).
+  1595→- 1 TanStack Query hooks file (`use-builder.ts`) with 20 hooks (queries + mutations) and per-write query-key invalidation. useDebugSession auto-polls every 3s while a session is in-flight.
+  1596→- 3 modified shared files: `src/lib/supabase/types.ts` (7 new table types), `src/components/dashboard/nav-config.ts` (new SectionId + nav item), `src/components/dashboard/section-router.tsx` (new render case + SECTION_TITLE entry).
+  1597→- Drag-drop: @dnd-kit's `PointerSensor` with 5px activation distance so palette items can be clicked without initiating a drag. Palette items carry `{ kind: 'palette-node', nodeType }` data; on drag-end over the canvas, a new node is created at the cursor's canvas coords with a generated `nodeKey` (e.g. `trigger_1`, `trigger_2`).
+  1598→- Canvas model: nodes are absolutely positioned with CSS transform `translate(pan) scale(zoom)`. Edges are straight SVG lines between source node's right edge and target node's left edge (beziers land in a future Phase). Node positions are stored on `workflow_nodes.position` (jsonb {x,y}) so the layout is recoverable from nodes alone; the `workflow_layouts` row carries the viewport + canvas meta.
+  1599→- Save semantics: `BuilderService.saveWorkflow` deletes the existing graph (edges cascade on node delete) and re-inserts nodes + edges + layout atomically so the saved state is always a faithful reflection of what the UI sent. Edge source/target node ids are looked up from the freshly-inserted node rows via a `keyToId` map.
+  1600→- Validation: pure-graph `validateWorkflow` checks for: empty graph, missing trigger, duplicate node keys, unknown node types, dangling edge endpoints, disabled-node warnings. `ok: true` when no error-severity issues are present.
+  1601→- Preview: pure-graph `previewWorkflow` walks the graph from start nodes in BFS order, merging each node's config into the variables map, capped at 100 steps (cycle detection).
+  1602→- Export/import: round-trip safe through `WorkflowExport` v1 (version-pinned). Import rewrites the workflowId from the URL path so callers can clone a workflow into a new id by POSTing to a different path.
+  1603→- All server files start with `import "server-only"`. All API routes use the thin pattern. All client-safe code lives behind `@/lib/builder/client`. No test code.
+  1604→
+  1605→---
+  1606→Task ID: REBUILD-FINAL
+  1607→Agent: main (rebuild lead)
+  1608→Task: Rebuild all missing Phases 6-11 after environment reset
+  1609→
+  1610→Work Log:
+  1611→- Rebuilt Phase 6 (Images): migration 0006, lib, 6 AI providers, 10 API routes, 7 UI components, hooks
+  1612→- Rebuilt Phase 7 (Video): migration 0007, lib, 8 AI providers, 8 API routes, 5 UI components, hooks
+  1613→- Rebuilt Phase 8 (Voice): migration 0008, lib, 8 AI providers, 13 API routes, 7 UI components, hooks
+  1614→- Rebuilt Phase 9 (Workspace): migration 0009 with is_workspace_member() function, 12 lib modules, 16 API routes, 9 UI components, hooks
+  1615→- Rebuilt Phase 10 (Business): migration 0010, 18 lib modules, 21 API route groups, 7 UI components, hooks
+  1616→- Rebuilt Phase 9A (Automation): migration 0011, 12 lib modules, 13 API routes, 6 UI components, hooks
+  1617→- Rebuilt Phase 9B (Builder): migration 0012, 5 lib modules, 14 API routes, 7 UI components, hooks
+  1618→- Rebuilt Phase 10 (Integration Hub): migration 0015+0015a, 13 lib modules, 28 connectors, 33 API routes, 10 UI components, hooks
+  1619→- Rebuilt Phase 11 (Marketing): migration 0016, marketing service, 11 API routes, 26 UI components, SEO (robots.ts + sitemap.ts)
+  1620→- Created 0013a_employee_scheduling.sql migration
+  1621→- Created 0017_phase10_1_enterprise_integrations.sql migration (11 tables)
+  1622→- Created src/instrumentation.ts for internal module integration bootstrap
+  1623→- Wired integrations into nav-config (Plug icon) + section-router
+  1624→- Restored .env with all required env vars
+  1625→- Fixed webhook route conflict ([id] vs [urlSlug])
+  1626→- Fixed all typecheck errors (0 remaining)
+  1627→- Fixed all lint errors (0 remaining)
+  1628→
+  1629→Stage Summary:
+  1630→- typecheck: 0 errors
+  1631→- lint: 0 errors, 0 warnings
+  1632→- 18 migrations (0001-0017)
+  1633→- 28 lib directories
+  1634→- 18 component directories
+  1635→- 16 API route groups
+  1636→- 725 TypeScript files
+  1637→- Dev server runs, all routes load
+  1638→- Marketing site renders at / for logged-out users
+  1639→- ?signin=1 shows auth flow
+  1640→- Dashboard works for authenticated users
+  1641→- SEO routes (robots.txt, sitemap.xml) return 200
+  1642→
