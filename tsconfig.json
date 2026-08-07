@@ -41,6 +41,10 @@
     "examples",
     "skills",
     "download",
-    "tests"
+    "tests",
+    "supabase/src",
+    "tool-results",
+    "supabase/examples",
+    "tool-results/examples"
   ]
 }

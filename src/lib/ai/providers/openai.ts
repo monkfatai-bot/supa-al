@@ -235,11 +235,13 @@ export class OpenAIProvider extends BaseAIProvider {
       });
     }
     const msg = choice.message;
-    const toolCalls: ToolCall[] | undefined = msg.tool_calls?.map((tc) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: tc.function.arguments,
-    }));
+    const toolCalls: ToolCall[] | undefined = msg.tool_calls
+      ?.filter((tc): tc is OpenAI.Chat.ChatCompletionMessageFunctionToolCall => tc.type === "function")
+      .map((tc) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+      }));
     return {
       id: res.id,
       model,
