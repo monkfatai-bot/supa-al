@@ -1,0 +1,546 @@
+     1→-- =============================================================================
+     2→-- SUPA AI — 0009_phase7_workspace.sql
+     3→-- Phase 7 / 9: Workspace & Collaboration Platform.
+     4→--
+     5→-- Creates the `workspaces` table plus 11 workspace-scoped collaboration
+     6→-- tables (members, folders, documents, document_versions, comments,
+     7→-- knowledge_base, file_library, workspace_roles, workspace_activity,
+     8→-- workspace_mentions, workspace_invitations).
+     9→--
+    10→-- CRITICAL: The `is_workspace_member(ws_id, user_id)` SQL function is created
+    11→-- FIRST. Every RLS policy on every workspace-scoped table in the platform
+    12→-- (including the Phase 9C `ai_employees` family from migration 0014) calls
+    13→-- this function. Until Phase 9A shipped this function, those policies
+    14→-- silently denied every row. Now they work for real.
+    15→--
+    16→-- Design principles (carried from 0001):
+    17→--   • Idempotent — every statement is safe to re-run.
+    18→--   • RLS on every new table. Default-deny. No `USING (true)` open policies.
+    19→--   • Money is integer cents. Timestamps are timestamptz.
+    20→--   • updated_at maintained by the shared set_updated_at() trigger from 0003.
+    21→-- =============================================================================
+    22→
+    23→-- -----------------------------------------------------------------------------
+    24→-- 0. is_workspace_member(ws_id, user_id) — SECURITY DEFINER
+    25→--
+    26→-- Returns true iff `user_id` is an `active` member of workspace `ws_id`.
+    27→-- Marked SECURITY DEFINER so it can be inlined into RLS policies on tables
+    28→-- the caller does not own (workspaces, workspace_members themselves).
+    29→-- Search path pinned to `public` to prevent trojan-horse schema attacks.
+    30→-- -----------------------------------------------------------------------------
+    31→create or replace function public.is_workspace_member(ws_id uuid, user_id uuid)
+    32→returns boolean
+    33→language sql
+    34→security definer
+    35→set search_path = public
+    36→as $$
+    37→  select exists (
+    38→    select 1
+    39→    from public.workspace_members wm
+    40→    where wm.workspace_id = ws_id
+    41→      and wm.user_id = user_id
+    42→      and wm.status = 'active'
+    43→  );
+    44→$$;
+    45→
+    46→-- =============================================================================
+    47→-- 1. workspaces
+    48→-- =============================================================================
+    49→create table if not exists public.workspaces (
+    50→  id                  uuid primary key default gen_random_uuid(),
+    51→  name                text not null,
+    52→  slug                text unique not null,
+    53→  description         text,
+    54→  logo_url            text,
+    55→  type                text not null default 'team'
+    56→                        check (type in ('personal','team','organization')),
+    57→  owner_id            uuid not null references auth.users (id) on delete cascade,
+    58→  billing_owner_id    uuid references auth.users (id) on delete set null,
+    59→  settings            jsonb not null default '{}',
+    60→  storage_used_bytes  bigint not null default 0,
+    61→  ai_credits_pool     integer not null default 0,
+    62→  is_archived         boolean not null default false,
+    63→  created_at          timestamptz not null default now(),
+    64→  updated_at          timestamptz not null default now()
+    65→);
+    66→
+    67→alter table public.workspaces enable row level security;
+    68→
+    69→create index if not exists workspaces_slug_idx on public.workspaces (slug);
+    70→create index if not exists workspaces_owner_idx on public.workspaces (owner_id);
+    71→create index if not exists workspaces_name_fts_idx on public.workspaces
+    72→  using gin (to_tsvector('english', coalesce(name,'') || ' ' || coalesce(description,'')));
+    73→
+    74→-- Owner can always read/write their workspaces; active members can read.
+    75→drop policy if exists "workspaces_select_member" on public.workspaces;
+    76→create policy "workspaces_select_member" on public.workspaces for select
+    77→  using (owner_id = auth.uid() or public.is_workspace_member(id, auth.uid()));
+    78→
+    79→drop policy if exists "workspaces_insert_owner" on public.workspaces;
+    80→create policy "workspaces_insert_owner" on public.workspaces for insert
+    81→  with check (owner_id = auth.uid());
+    82→
+    83→drop policy if exists "workspaces_update_owner_admin" on public.workspaces;
+    84→create policy "workspaces_update_owner_admin" on public.workspaces for update
+    85→  using (owner_id = auth.uid());
+    86→
+    87→drop policy if exists "workspaces_delete_owner" on public.workspaces;
+    88→create policy "workspaces_delete_owner" on public.workspaces for delete
+    89→  using (owner_id = auth.uid());
+    90→
+    91→-- =============================================================================
+    92→-- 2. workspace_members
+    93→-- =============================================================================
+    94→create table if not exists public.workspace_members (
+    95→  id            uuid primary key default gen_random_uuid(),
+    96→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+    97→  user_id       uuid not null references auth.users (id) on delete cascade,
+    98→  role          text not null default 'member'
+    99→                  check (role in ('owner','admin','editor','viewer','member')),
+   100→  status        text not null default 'active'
+   101→                  check (status in ('active','invited','suspended','removed')),
+   102→  invited_by    uuid references auth.users (id) on delete set null,
+   103→  invited_at    timestamptz not null default now(),
+   104→  joined_at     timestamptz,
+   105→  created_at    timestamptz not null default now(),
+   106→  updated_at    timestamptz not null default now(),
+   107→  unique (workspace_id, user_id)
+   108→);
+   109→
+   110→alter table public.workspace_members enable row level security;
+   111→
+   112→create index if not exists workspace_members_workspace_idx on public.workspace_members (workspace_id, role);
+   113→create index if not exists workspace_members_user_idx on public.workspace_members (user_id, status);
+   114→
+   115→-- Members of a workspace can read its member list. A user can always read their
+   116→-- own rows so they can see pending invitations addressed to them.
+   117→drop policy if exists "workspace_members_select_ws" on public.workspace_members;
+   118→create policy "workspace_members_select_ws" on public.workspace_members for select
+   119→  using (
+   120→    user_id = auth.uid()
+   121→    or public.is_workspace_member(workspace_id, auth.uid())
+   122→  );
+   123→
+   124→-- A user can self-insert to accept an invitation; otherwise the workspace owner
+   125→-- or an admin invites. We accept either path here — the service layer enforces
+   126→-- the invite-token + role check before reaching this policy.
+   127→drop policy if exists "workspace_members_insert_ws" on public.workspace_members;
+   128→create policy "workspace_members_insert_ws" on public.workspace_members for insert
+   129→  with check (
+   130→    user_id = auth.uid()
+   131→    or exists (
+   132→      select 1 from public.workspaces w
+   133→      where w.id = workspace_id
+   134→        and (w.owner_id = auth.uid() or public.is_workspace_member(w.id, auth.uid()))
+   135→    )
+   136→  );
+   137→
+   138→drop policy if exists "workspace_members_update_ws" on public.workspace_members;
+   139→create policy "workspace_members_update_ws" on public.workspace_members for update
+   140→  using (
+   141→    user_id = auth.uid()
+   142→    or public.is_workspace_member(workspace_id, auth.uid())
+   143→  );
+   144→
+   145→drop policy if exists "workspace_members_delete_ws" on public.workspace_members;
+   146→create policy "workspace_members_delete_ws" on public.workspace_members for delete
+   147→  using (
+   148→    user_id = auth.uid()
+   149→    or public.is_workspace_member(workspace_id, auth.uid())
+   150→  );
+   151→
+   152→-- =============================================================================
+   153→-- 3. folders (workspace document tree)
+   154→-- =============================================================================
+   155→create table if not exists public.folders (
+   156→  id            uuid primary key default gen_random_uuid(),
+   157→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+   158→  parent_id     uuid references public.folders (id) on delete cascade,
+   159→  name          text not null,
+   160→  path          text not null default '/',
+   161→  created_by    uuid references auth.users (id) on delete set null,
+   162→  created_at    timestamptz not null default now(),
+   163→  updated_at    timestamptz not null default now()
+   164→);
+   165→
+   166→alter table public.folders enable row level security;
+   167→
+   168→create index if not exists folders_workspace_idx on public.folders (workspace_id, parent_id);
+   169→create index if not exists folders_path_idx on public.folders (workspace_id, path);
+   170→
+   171→drop policy if exists "folders_ws" on public.folders;
+   172→create policy "folders_ws" on public.folders for select
+   173→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   174→
+   175→drop policy if exists "folders_ws_write" on public.folders;
+   176→create policy "folders_ws_write" on public.folders for insert
+   177→  with check (public.is_workspace_member(workspace_id, auth.uid()));
+   178→
+   179→drop policy if exists "folders_ws_update" on public.folders;
+   180→create policy "folders_ws_update" on public.folders for update
+   181→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   182→
+   183→drop policy if exists "folders_ws_delete" on public.folders;
+   184→create policy "folders_ws_delete" on public.folders for delete
+   185→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   186→
+   187→-- =============================================================================
+   188→-- 4. documents
+   189→-- =============================================================================
+   190→create table if not exists public.documents (
+   191→  id            uuid primary key default gen_random_uuid(),
+   192→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+   193→  folder_id     uuid references public.folders (id) on delete set null,
+   194→  title         text not null,
+   195→  content       text,
+   196→  content_type  text not null default 'markdown'
+   197→                  check (content_type in ('markdown','plain','html','json')),
+   198→  status        text not null default 'draft'
+   199→                  check (status in ('draft','published','archived')),
+   200→  version       integer not null default 1,
+   201→  created_by    uuid references auth.users (id) on delete set null,
+   202→  created_at    timestamptz not null default now(),
+   203→  updated_at    timestamptz not null default now()
+   204→);
+   205→
+   206→alter table public.documents enable row level security;
+   207→
+   208→create index if not exists documents_workspace_idx on public.documents (workspace_id, updated_at desc);
+   209→create index if not exists documents_folder_idx on public.documents (folder_id);
+   210→create index if not exists documents_title_fts_idx on public.documents
+   211→  using gin (to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,'')));
+   212→
+   213→drop policy if exists "documents_ws" on public.documents;
+   214→create policy "documents_ws" on public.documents for select
+   215→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   216→
+   217→drop policy if exists "documents_ws_write" on public.documents;
+   218→create policy "documents_ws_write" on public.documents for insert
+   219→  with check (public.is_workspace_member(workspace_id, auth.uid()));
+   220→
+   221→drop policy if exists "documents_ws_update" on public.documents;
+   222→create policy "documents_ws_update" on public.documents for update
+   223→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   224→
+   225→drop policy if exists "documents_ws_delete" on public.documents;
+   226→create policy "documents_ws_delete" on public.documents for delete
+   227→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   228→
+   229→-- =============================================================================
+   230→-- 5. document_versions (immutable history)
+   231→-- =============================================================================
+   232→create table if not exists public.document_versions (
+   233→  id            uuid primary key default gen_random_uuid(),
+   234→  document_id   uuid not null references public.documents (id) on delete cascade,
+   235→  version       integer not null,
+   236→  content       text,
+   237→  changed_by    uuid references auth.users (id) on delete set null,
+   238→  changed_at    timestamptz not null default now(),
+   239→  created_at    timestamptz not null default now(),
+   240→  unique (document_id, version)
+   241→);
+   242→
+   243→alter table public.document_versions enable row level security;
+   244→
+   245→create index if not exists document_versions_doc_idx on public.document_versions (document_id, version desc);
+   246→
+   247→drop policy if exists "document_versions_ws" on public.document_versions;
+   248→create policy "document_versions_ws" on public.document_versions for select
+   249→  using (
+   250→    exists (
+   251→      select 1 from public.documents d
+   252→      where d.id = document_versions.document_id
+   253→        and public.is_workspace_member(d.workspace_id, auth.uid())
+   254→    )
+   255→  );
+   256→
+   257→drop policy if exists "document_versions_ws_write" on public.document_versions;
+   258→create policy "document_versions_ws_write" on public.document_versions for insert
+   259→  with check (
+   260→    exists (
+   261→      select 1 from public.documents d
+   262→      where d.id = document_versions.document_id
+   263→        and public.is_workspace_member(d.workspace_id, auth.uid())
+   264→    )
+   265→  );
+   266→
+   267→-- =============================================================================
+   268→-- 6. comments (threaded)
+   269→-- =============================================================================
+   270→create table if not exists public.comments (
+   271→  id            uuid primary key default gen_random_uuid(),
+   272→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+   273→  document_id   uuid references public.documents (id) on delete cascade,
+   274→  parent_id     uuid references public.comments (id) on delete cascade,
+   275→  author_id     uuid not null references auth.users (id) on delete cascade,
+   276→  body         text not null,
+   277→  resolved     boolean not null default false,
+   278→  created_at   timestamptz not null default now(),
+   279→  updated_at   timestamptz not null default now()
+   280→);
+   281→
+   282→alter table public.comments enable row level security;
+   283→
+   284→create index if not exists comments_workspace_idx on public.comments (workspace_id, created_at desc);
+   285→create index if not exists comments_document_idx on public.comments (document_id, created_at desc);
+   286→create index if not exists comments_parent_idx on public.comments (parent_id);
+   287→
+   288→drop policy if exists "comments_ws" on public.comments;
+   289→create policy "comments_ws" on public.comments for select
+   290→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   291→
+   292→drop policy if exists "comments_ws_write" on public.comments;
+   293→create policy "comments_ws_write" on public.comments for insert
+   294→  with check (public.is_workspace_member(workspace_id, auth.uid()) and author_id = auth.uid());
+   295→
+   296→drop policy if exists "comments_ws_update" on public.comments;
+   297→create policy "comments_ws_update" on public.comments for update
+   298→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   299→
+   300→drop policy if exists "comments_ws_delete" on public.comments;
+   301→create policy "comments_ws_delete" on public.comments for delete
+   302→  using (public.is_workspace_member(workspace_id, auth.uid()) and author_id = auth.uid());
+   303→
+   304→-- =============================================================================
+   305→-- 7. knowledge_base
+   306→-- =============================================================================
+   307→create table if not exists public.knowledge_base (
+   308→  id            uuid primary key default gen_random_uuid(),
+   309→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+   310→  title         text not null,
+   311→  content       text,
+   312→  source        text,
+   313→  source_id     uuid,
+   314→  source_type   text check (source_type in ('document','file','url','manual','ai-generated')),
+   315→  tags          text[] not null default '{}',
+   316→  metadata      jsonb,
+   317→  created_at    timestamptz not null default now(),
+   318→  updated_at    timestamptz not null default now()
+   319→);
+   320→
+   321→alter table public.knowledge_base enable row level security;
+   322→
+   323→create index if not exists knowledge_base_workspace_idx on public.knowledge_base (workspace_id, updated_at desc);
+   324→create index if not exists knowledge_base_title_fts_idx on public.knowledge_base
+   325→  using gin (to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,'')));
+   326→create index if not exists knowledge_base_tags_idx on public.knowledge_base using gin (tags);
+   327→
+   328→drop policy if exists "knowledge_base_ws" on public.knowledge_base;
+   329→create policy "knowledge_base_ws" on public.knowledge_base for select
+   330→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   331→
+   332→drop policy if exists "knowledge_base_ws_write" on public.knowledge_base;
+   333→create policy "knowledge_base_ws_write" on public.knowledge_base for insert
+   334→  with check (public.is_workspace_member(workspace_id, auth.uid()));
+   335→
+   336→drop policy if exists "knowledge_base_ws_update" on public.knowledge_base;
+   337→create policy "knowledge_base_ws_update" on public.knowledge_base for update
+   338→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   339→
+   340→drop policy if exists "knowledge_base_ws_delete" on public.knowledge_base;
+   341→create policy "knowledge_base_ws_delete" on public.knowledge_base for delete
+   342→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   343→
+   344→-- =============================================================================
+   345→-- 8. file_library
+   346→-- =============================================================================
+   347→create table if not exists public.file_library (
+   348→  id            uuid primary key default gen_random_uuid(),
+   349→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+   350→  folder_id     uuid references public.folders (id) on delete set null,
+   351→  file_name     text not null,
+   352→  file_path     text not null,
+   353→  file_size     bigint not null default 0,
+   354→  mime_type     text,
+   355→  created_by    uuid references auth.users (id) on delete set null,
+   356→  created_at    timestamptz not null default now()
+   357→);
+   358→
+   359→alter table public.file_library enable row level security;
+   360→
+   361→create index if not exists file_library_workspace_idx on public.file_library (workspace_id, created_at desc);
+   362→create index if not exists file_library_folder_idx on public.file_library (folder_id);
+   363→
+   364→drop policy if exists "file_library_ws" on public.file_library;
+   365→create policy "file_library_ws" on public.file_library for select
+   366→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   367→
+   368→drop policy if exists "file_library_ws_write" on public.file_library;
+   369→create policy "file_library_ws_write" on public.file_library for insert
+   370→  with check (public.is_workspace_member(workspace_id, auth.uid()));
+   371→
+   372→drop policy if exists "file_library_ws_delete" on public.file_library;
+   373→create policy "file_library_ws_delete" on public.file_library for delete
+   374→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   375→
+   376→-- =============================================================================
+   377→-- 9. workspace_roles (custom per-workspace roles)
+   378→-- =============================================================================
+   379→create table if not exists public.workspace_roles (
+   380→  id            uuid primary key default gen_random_uuid(),
+   381→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+   382→  name          text not null,
+   383→  permissions   jsonb not null default '{}',
+   384→  is_default    boolean not null default false,
+   385→  created_at    timestamptz not null default now(),
+   386→  updated_at    timestamptz not null default now(),
+   387→  unique (workspace_id, name)
+   388→);
+   389→
+   390→alter table public.workspace_roles enable row level security;
+   391→
+   392→create index if not exists workspace_roles_workspace_idx on public.workspace_roles (workspace_id);
+   393→
+   394→drop policy if exists "workspace_roles_ws" on public.workspace_roles;
+   395→create policy "workspace_roles_ws" on public.workspace_roles for select
+   396→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   397→
+   398→drop policy if exists "workspace_roles_ws_write" on public.workspace_roles;
+   399→create policy "workspace_roles_ws_write" on public.workspace_roles for insert
+   400→  with check (public.is_workspace_member(workspace_id, auth.uid()));
+   401→
+   402→drop policy if exists "workspace_roles_ws_update" on public.workspace_roles;
+   403→create policy "workspace_roles_ws_update" on public.workspace_roles for update
+   404→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   405→
+   406→drop policy if exists "workspace_roles_ws_delete" on public.workspace_roles;
+   407→create policy "workspace_roles_ws_delete" on public.workspace_roles for delete
+   408→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   409→
+   410→-- =============================================================================
+   411→-- 10. workspace_activity (audit feed)
+   412→-- =============================================================================
+   413→create table if not exists public.workspace_activity (
+   414→  id            uuid primary key default gen_random_uuid(),
+   415→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+   416→  user_id       uuid references auth.users (id) on delete set null,
+   417→  action        text not null,
+   418→  resource_type text,
+   419→  resource_id   uuid,
+   420→  metadata      jsonb,
+   421→  created_at    timestamptz not null default now()
+   422→);
+   423→
+   424→alter table public.workspace_activity enable row level security;
+   425→
+   426→create index if not exists workspace_activity_workspace_idx on public.workspace_activity (workspace_id, created_at desc);
+   427→create index if not exists workspace_activity_resource_idx on public.workspace_activity (resource_type, resource_id);
+   428→
+   429→drop policy if exists "workspace_activity_ws" on public.workspace_activity;
+   430→create policy "workspace_activity_ws" on public.workspace_activity for select
+   431→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   432→
+   433→drop policy if exists "workspace_activity_ws_write" on public.workspace_activity;
+   434→create policy "workspace_activity_ws_write" on public.workspace_activity for insert
+   435→  with check (public.is_workspace_member(workspace_id, auth.uid()));
+   436→
+   437→-- =============================================================================
+   438→-- 11. workspace_mentions
+   439→-- =============================================================================
+   440→create table if not exists public.workspace_mentions (
+   441→  id                  uuid primary key default gen_random_uuid(),
+   442→  workspace_id        uuid not null references public.workspaces (id) on delete cascade,
+   443→  document_id         uuid references public.documents (id) on delete cascade,
+   444→  comment_id          uuid references public.comments (id) on delete cascade,
+   445→  mentioned_user_id   uuid not null references auth.users (id) on delete cascade,
+   446→  mentioned_by         uuid references auth.users (id) on delete set null,
+   447→  is_read             boolean not null default false,
+   448→  created_at          timestamptz not null default now()
+   449→);
+   450→
+   451→alter table public.workspace_mentions enable row level security;
+   452→
+   453→create index if not exists workspace_mentions_user_idx on public.workspace_mentions (mentioned_user_id, is_read, created_at desc);
+   454→create index if not exists workspace_mentions_workspace_idx on public.workspace_mentions (workspace_id, created_at desc);
+   455→
+   456→drop policy if exists "workspace_mentions_ws" on public.workspace_mentions;
+   457→create policy "workspace_mentions_ws" on public.workspace_mentions for select
+   458→  using (
+   459→    mentioned_user_id = auth.uid()
+   460→    or public.is_workspace_member(workspace_id, auth.uid())
+   461→  );
+   462→
+   463→drop policy if exists "workspace_mentions_ws_write" on public.workspace_mentions;
+   464→create policy "workspace_mentions_ws_write" on public.workspace_mentions for insert
+   465→  with check (public.is_workspace_member(workspace_id, auth.uid()));
+   466→
+   467→drop policy if exists "workspace_mentions_ws_update" on public.workspace_mentions;
+   468→create policy "workspace_mentions_ws_update" on public.workspace_mentions for update
+   469→  using (mentioned_user_id = auth.uid() or public.is_workspace_member(workspace_id, auth.uid()));
+   470→
+   471→-- =============================================================================
+   472→-- 12. workspace_invitations
+   473→-- =============================================================================
+   474→create table if not exists public.workspace_invitations (
+   475→  id            uuid primary key default gen_random_uuid(),
+   476→  workspace_id  uuid not null references public.workspaces (id) on delete cascade,
+   477→  email         text not null,
+   478→  role          text not null default 'member'
+   479→                  check (role in ('owner','admin','editor','viewer','member')),
+   480→  token         text not null unique,
+   481→  invited_by    uuid not null references auth.users (id) on delete cascade,
+   482→  expires_at    timestamptz not null default (now() + interval '7 days'),
+   483→  accepted_at   timestamptz,
+   484→  created_at    timestamptz not null default now()
+   485→);
+   486→
+   487→alter table public.workspace_invitations enable row level security;
+   488→
+   489→create index if not exists workspace_invitations_workspace_idx on public.workspace_invitations (workspace_id, created_at desc);
+   490→create index if not exists workspace_invitations_email_idx on public.workspace_invitations (email, accepted_at);
+   491→create index if not exists workspace_invitations_token_idx on public.workspace_invitations (token);
+   492→
+   493→drop policy if exists "workspace_invitations_ws" on public.workspace_invitations;
+   494→create policy "workspace_invitations_ws" on public.workspace_invitations for select
+   495→  using (
+   496→    public.is_workspace_member(workspace_id, auth.uid())
+   497→    or email in (
+   498→      select coalesce(email, '') from public.users where id = auth.uid()
+   499→    )
+   500→  );
+   501→
+   502→drop policy if exists "workspace_invitations_ws_write" on public.workspace_invitations;
+   503→create policy "workspace_invitations_ws_write" on public.workspace_invitations for insert
+   504→  with check (public.is_workspace_member(workspace_id, auth.uid()));
+   505→
+   506→drop policy if exists "workspace_invitations_ws_update" on public.workspace_invitations;
+   507→create policy "workspace_invitations_ws_update" on public.workspace_invitations for update
+   508→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   509→
+   510→drop policy if exists "workspace_invitations_ws_delete" on public.workspace_invitations;
+   511→create policy "workspace_invitations_ws_delete" on public.workspace_invitations for delete
+   512→  using (public.is_workspace_member(workspace_id, auth.uid()));
+   513→
+   514→-- =============================================================================
+   515→-- updated_at triggers (re-using the shared set_updated_at() from 0003)
+   516→-- =============================================================================
+   517→do $$
+   518→declare t text;
+   519→begin
+   520→  foreach t in array array[
+   521→    'workspaces',
+   522→    'workspace_members',
+   523→    'folders',
+   524→    'documents',
+   525→    'comments',
+   526→    'knowledge_base',
+   527→    'workspace_roles'
+   528→  ] loop
+   529→    execute format('drop trigger if exists set_updated_at on public.%I;', t);
+   530→    execute format(
+   531→      'create trigger set_updated_at before update on public.%I '
+   532→      'for each row execute function public.set_updated_at();',
+   533→      t
+   534→    );
+   535→  end loop;
+   536→end;
+   537→$$;
+   538→
+   539→-- =============================================================================
+   540→-- Realtime
+   541→-- =============================================================================
+   542→alter publication supabase_realtime add table public.documents;
+   543→alter publication supabase_realtime add table public.comments;
+   544→alter publication supabase_realtime add table public.workspace_activity;
+   545→alter publication supabase_realtime add table public.workspace_mentions;
+   546→

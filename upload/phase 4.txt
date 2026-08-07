@@ -1,0 +1,368 @@
+PHASE 4 — AI Image Generation Engine (Production Ready)
+Objective
+
+Build a production-ready AI Image Generation platform inside Supa AI. This module must support multiple image providers, image editing, upscaling, background removal, prompt enhancement, image history, credit tracking, and enterprise-grade security.
+
+No mock APIs or placeholder implementations are allowed.
+
+Supported Image Providers
+
+Integrate using official APIs:
+
+OpenAI Images (GPT Image)
+Google Gemini Image (when available)
+Stability AI (SDXL)
+Replicate
+Flux (Black Forest Labs)
+Ideogram
+Fal.ai
+
+Requirements:
+
+Dynamic provider selection
+Automatic provider failover
+Provider health monitoring
+Model switching
+Retry mechanism
+Timeout handling
+Image Models
+
+Support multiple models.
+
+Examples:
+
+GPT Image
+SDXL
+Flux Pro
+Flux Schnell
+Ideogram V3
+Realistic Vision
+Juggernaut XL
+
+Each model should include:
+
+Name
+Provider
+Cost
+Resolution limits
+Supported aspect ratios
+Image quality
+Speed
+Availability
+AI Image Generator
+
+Support:
+
+Text-to-Image
+Image-to-Image
+Image Variations
+Image Editing
+Inpainting
+Outpainting
+
+Allow users to:
+
+Enter prompt
+Negative prompt
+Select provider
+Select model
+Select style
+Select resolution
+Select aspect ratio
+Select number of images
+Set seed
+Creativity strength
+Guidance scale
+Steps
+Prompt Enhancement
+
+Automatically improve prompts.
+
+Include:
+
+Prompt optimization
+Prompt suggestions
+Style enhancement
+Prompt history
+Saved prompts
+Favorite prompts
+Image Editing
+
+Support:
+
+Remove background
+Replace background
+Object removal
+Object replacement
+Face enhancement
+Color correction
+Upscaling
+Sharpening
+Denoising
+Image restoration
+Image History
+
+Store:
+
+Prompt
+Negative prompt
+Provider
+Model
+Generated image URL
+Thumbnail
+Credits used
+Generation time
+Resolution
+Aspect ratio
+User ID
+Timestamp
+
+Allow:
+
+Download
+Delete
+Favorite
+Regenerate
+Duplicate
+Share
+Image Upload
+
+Support uploads for editing.
+
+Formats:
+
+PNG
+JPG
+JPEG
+WEBP
+
+Validate:
+
+File size
+Image dimensions
+File type
+Corrupted images
+Credit System
+
+Every image request must:
+
+Deduct AI credits
+Track usage
+Refund credits on failure
+Prevent generation when credits are insufficient
+Support premium pricing
+Database
+
+Create production-ready tables:
+
+image_generations
+image_models
+image_styles
+image_uploads
+image_usage
+
+Implement:
+
+Foreign keys
+Indexes
+Constraints
+Row Level Security (RLS)
+Automatic timestamps
+Storage
+
+Use Supabase Storage.
+
+Requirements:
+
+Store:
+
+Original uploads
+Generated images
+Thumbnails
+Edited images
+
+Organize folders:
+
+users/
+   uploads/
+   generated/
+   edited/
+   thumbnails/
+
+Implement:
+
+Signed URLs
+Secure uploads
+Automatic cleanup
+Storage quotas
+Image Gallery
+
+Create a gallery with:
+
+Grid view
+List view
+Search
+Filters
+Sort by date
+Sort by provider
+Sort by model
+Favorites
+Infinite scroll
+Pagination
+UI Components
+
+Create:
+
+Prompt input
+Negative prompt input
+Provider selector
+Model selector
+Style selector
+Resolution selector
+Aspect ratio selector
+Image preview
+Loading animation
+Progress indicator
+Gallery
+History panel
+
+Responsive on:
+
+Desktop
+Tablet
+Mobile
+Security
+
+Implement:
+
+Input validation
+Prompt sanitization
+Upload validation
+Rate limiting
+Secret management
+Secure image URLs
+Abuse prevention
+Storage security
+
+Never expose provider API keys.
+
+Performance
+
+Optimize:
+
+Parallel image generation
+Upload speed
+Image caching
+Lazy loading
+Thumbnail generation
+Storage efficiency
+Database indexing
+Monitoring
+
+Track:
+
+Provider latency
+Generation failures
+Credits consumed
+Storage usage
+Upload failures
+Image generation time
+API response time
+
+Provide admin analytics.
+
+API Endpoints
+
+Implement secure APIs for:
+
+Generate image
+Edit image
+Upscale image
+Remove background
+Image history
+Gallery
+Delete image
+Favorite image
+Download image
+Error Handling
+
+Gracefully handle:
+
+Invalid prompts
+Provider downtime
+Upload failures
+Timeout
+Corrupted files
+Unsupported formats
+Credit exhaustion
+Storage failures
+
+Return consistent, user-friendly error messages.
+
+Testing
+
+Verify:
+
+Every provider generates images successfully.
+Model switching works.
+Prompt enhancement works.
+Upload validation works.
+Image editing works.
+Background removal works.
+Upscaling works.
+Credits deduct correctly.
+Refunds work correctly.
+Gallery loads efficiently.
+Storage works correctly.
+RLS policies protect user data.
+Build Verification
+
+Run before approval:
+
+npm install
+
+npm run lint
+
+npm run type-check
+
+npm run build
+
+All commands must pass without production-blocking errors.
+
+Deliverables
+
+Phase 4 must include:
+
+Complete AI Image Engine
+Multi-provider integration
+Image editing suite
+Prompt enhancement
+Image gallery
+Image history
+Credit tracking
+Storage integration
+Production database migrations
+Production APIs
+Responsive UI
+Security hardening
+Documentation
+Automated tests
+Definition of Done
+
+Phase 4 is complete only when:
+
+All supported image providers are operational.
+Image generation works reliably.
+Image editing features function correctly.
+Background removal and upscaling are production-ready.
+Images are securely stored in Supabase Storage.
+Credits are accurately deducted and refunded.
+All database tables have Row Level Security (RLS).
+The application passes:
+npm run lint
+npm run type-check
+npm run build
+No mock implementations remain.
+No critical security or performance issues exist.
+
+Only after Phase 4 passes CTO review should development proceed to Phase 5 (AI Video Generation Engine).
