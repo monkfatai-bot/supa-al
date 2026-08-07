@@ -140,7 +140,7 @@ class MemoryStore implements KVStore {
  * Shared in-memory store singleton. Survives HMR by living on `globalThis`.
  */
 declare global {
-  var __supaMemoryStore: MemoryStore | undefined;
+  var __supaMemoryStore: KVStore | undefined;
 }
 
 export const memoryStore: KVStore =
