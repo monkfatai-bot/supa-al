@@ -39,7 +39,7 @@ export * from "./chat";
  * // input is fully typed as SignUpInput
  * ```
  */
-export function validateInput<T>(schema: z.ZodType<T>, data: unknown): T {
+export function validateInput<TOutput>(schema: z.ZodType<TOutput, z.ZodTypeDef, any>, data: unknown): TOutput {
   const result = schema.safeParse(data);
   if (!result.success) {
     const fields = result.error.issues.map((issue) => ({
@@ -64,10 +64,10 @@ export function validateInput<T>(schema: z.ZodType<T>, data: unknown): T {
  * const input = result.value;
  * ```
  */
-export function safeValidate<T>(
-  schema: z.ZodType<T>,
+export function safeValidate<TOutput>(
+  schema: z.ZodType<TOutput, z.ZodTypeDef, any>,
   data: unknown,
-): Result<T, AppError> {
+): Result<TOutput, AppError> {
   const result = schema.safeParse(data);
   if (result.success) {
     return { ok: true, value: result.data };
