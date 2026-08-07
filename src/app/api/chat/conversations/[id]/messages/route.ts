@@ -116,7 +116,9 @@ export async function POST(
         content: String(row.content ?? ""),
       });
     }
-    messages.push({ role: "user", content: input.content });
+    // Coerce input.content to string to satisfy TypeScript when the inferred
+    // type is `unknown` during build-time.
+    messages.push({ role: "user", content: String(input.content) });
 
     // Run the streaming chat service, but buffer the full response so we can
     // return it as a single JSON payload (non-streaming fallback).
