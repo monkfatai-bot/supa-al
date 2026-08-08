@@ -27,7 +27,11 @@ import { toAppError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { createAuthService } from "@/lib/auth/auth-service";
 import { getClientIp } from "@/lib/auth/helpers";
-\n// OAuth callbacks are request-time endpoints. Never attempt to statically\n// collect or pre-render this route during a production build.\nexport const dynamic = "force-dynamic";\n
+
+// OAuth callbacks are request-time endpoints. Never attempt to statically
+// collect or pre-render this route during a production build.
+export const dynamic = "force-dynamic";
+
 /**
  * Validate that `next` is a same-origin relative URL. We only accept paths
  * starting with `/` and reject anything that looks like a scheme-relative
