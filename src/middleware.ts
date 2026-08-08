@@ -21,6 +21,7 @@ import { createServerClient } from "@supabase/ssr";
 
 import { env } from "@/lib/config/env";
 import { logger } from "@/lib/logger";
+import { applySecurityHeaders } from "@/lib/middleware/security-headers";
 
 async function updateSession(request: NextRequest): Promise<NextResponse> {
   let response = NextResponse.next({ request });
@@ -58,6 +59,7 @@ async function updateSession(request: NextRequest): Promise<NextResponse> {
     });
   }
 
+  applySecurityHeaders(response.headers);
   return response;
 }
 

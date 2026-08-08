@@ -27,7 +27,7 @@ export async function POST(
     const { runId } = await ctx.params;
     if (!runId) throw new NotFoundError("WorkflowRun");
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const run = await service.retryRun(runId);
     return apiSuccess({ run });
   } catch (err) {

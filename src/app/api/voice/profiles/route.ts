@@ -12,7 +12,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import { apiError, apiSuccess, requireAuth } from "@/lib/auth/api-helpers";
-import { createProfileService } from "@/lib/voice";
+import { assertVoiceWorkspaceMembership, createProfileService } from "@/lib/voice";
 import { validateInput } from "@/lib/validation";
 import {
   createProfileSchema,
@@ -52,6 +52,7 @@ export async function POST(
     const user = await requireAuth();
     const input = validateInput(createProfileSchema, await req.json());
     const workspaceId = input.workspaceId ?? user.id;
+    await assertVoiceWorkspaceMembership(workspaceId, user.id);
 
     const service = createProfileService();
     const profile = await service.create({

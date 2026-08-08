@@ -30,7 +30,8 @@ import {
   toAppError,
 } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import type { AdminSupabaseClient } from "@/lib/supabase/admin";
+import { decrypt } from "@/lib/security/crypto";
+import type { AnySupabaseClient } from "@/lib/auth/helpers";
 
 import { actionRegistry } from "./registry";
 import { variableResolver } from "./resolver";
@@ -90,7 +91,7 @@ function toJson(value: unknown): Json {
  * handlers that need the actual value must read it from the DB).
  */
 function variableToScope(v: WorkflowVariable): [string, unknown] {
-  if (v.is_secret) return [v.key, "[secret]"];
+  if (v.is_secret) return [v.key, v.value ? decrypt(v.value) : ""];
   if (v.type === "number") {
     const n = Number(v.value ?? 0);
     return [v.key, Number.isFinite(n) ? n : null];
@@ -120,7 +121,7 @@ function variableToScope(v: WorkflowVariable): [string, unknown] {
  */
 export class WorkflowExecutor {
   constructor(
-    private readonly supabase: AdminSupabaseClient,
+    private readonly supabase: AnySupabaseClient,
     private readonly registry: { find(type: string): ActionHandler | undefined } = actionRegistry,
   ) {}
 

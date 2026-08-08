@@ -20,7 +20,7 @@ export async function GET(
     await requireAuth();
     const workspaceId = resolveWorkspaceId(req);
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const dashboard = await service.getDashboard(workspaceId);
     return apiSuccess({ dashboard });
   } catch (err) {

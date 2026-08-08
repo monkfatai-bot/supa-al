@@ -30,7 +30,7 @@ import {
   toAppError,
 } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import type { AdminSupabaseClient } from "@/lib/supabase/admin";
+import type { AnySupabaseClient } from "@/lib/auth/helpers";
 
 import { WorkflowExecutor } from "./executor";
 import { runQueue } from "./queue";
@@ -87,7 +87,7 @@ function toJson(value: unknown): Json {
  */
 export class TriggerDispatcher {
   constructor(
-    private readonly supabase: AdminSupabaseClient,
+    private readonly supabase: AnySupabaseClient,
     private readonly executor: WorkflowExecutor,
     private readonly queue = runQueue,
   ) {}

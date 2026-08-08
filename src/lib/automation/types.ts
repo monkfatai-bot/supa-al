@@ -211,6 +211,8 @@ export interface DispatchWebhookInput {
   urlSlug: string;
   /** Raw body of the inbound webhook request. */
   body: unknown;
+  /** Exact HTTP request body used for signature verification. */
+  rawBody?: string;
   /** Optional headers from the inbound request (used to verify signatures). */
   headers?: Record<string, string | string[] | undefined>;
 }

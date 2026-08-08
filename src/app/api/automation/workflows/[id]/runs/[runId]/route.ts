@@ -26,7 +26,7 @@ export async function GET(
     if (!id) throw new NotFoundError("Workflow");
     if (!runId) throw new NotFoundError("WorkflowRun");
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const run = await service.getRun(runId);
     if (!run) throw new NotFoundError("WorkflowRun", runId);
 

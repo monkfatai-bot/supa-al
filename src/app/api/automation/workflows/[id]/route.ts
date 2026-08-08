@@ -31,7 +31,7 @@ export async function GET(
     const { id } = await ctx.params;
     if (!id) throw new NotFoundError("Workflow");
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const workflow = await service.getWorkflow(id);
     if (!workflow) throw new NotFoundError("Workflow", id);
 
@@ -53,7 +53,7 @@ export async function PATCH(
     const body = await parseJsonBody(req);
     const input = validateInput(updateWorkflowSchema, body);
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const workflow = await service.updateWorkflow(id, input);
     return apiSuccess({ workflow });
   } catch (err) {
@@ -70,7 +70,7 @@ export async function DELETE(
     const { id } = await ctx.params;
     if (!id) throw new NotFoundError("Workflow");
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     await service.deleteWorkflow(id);
     return apiSuccess({ deleted: true });
   } catch (err) {

@@ -37,8 +37,9 @@ import {
   ValidationError,
 } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import type { AdminSupabaseClient } from "@/lib/supabase/admin";
+import { encrypt } from "@/lib/security/crypto";
+import type { AnySupabaseClient } from "@/lib/auth/helpers";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import { WorkflowExecutor } from "./executor";
 import { runQueue } from "./queue";
@@ -150,7 +151,7 @@ function generateUrlSlug(workflowName: string): string {
  */
 export class AutomationService {
   constructor(
-    private readonly supabase: AdminSupabaseClient,
+    private readonly supabase: AnySupabaseClient,
     /** Optional executor — when omitted, the service constructs its own. */
     private readonly executor?: WorkflowExecutor,
   ) {}
@@ -534,15 +535,21 @@ export class AutomationService {
       throw new ValidationError("Variable key is required.");
     }
 
+    const isSecret = input.isSecret ?? (input.type === "secret");
+    const value = input.value ?? null;
+    if (isSecret && value === null) {
+      throw new ValidationError("A secret variable requires a value.");
+    }
+
     try {
       const { data, error } = await this.supabase
         .from("workflow_variables")
         .insert({
           workflow_id: workflowId,
           key: input.key.trim(),
-          value: input.value ?? null,
+          value: isSecret && value !== null ? encrypt(value) : value,
           type: input.type ?? "string",
-          is_secret: input.isSecret ?? (input.type === "secret"),
+          is_secret: isSecret,
         } as never)
         .select()
         .single();
@@ -563,12 +570,25 @@ export class AutomationService {
     variableId: string,
     input: UpdateVariableInput,
   ): Promise<WorkflowVariable> {
-    const patch: Record<string, unknown> = {};
-    if (input.value !== undefined) patch.value = input.value;
-    if (input.type !== undefined) patch.type = input.type;
-    if (input.isSecret !== undefined) patch.is_secret = input.isSecret;
-
     try {
+      const { data: existing, error: existingError } = await this.supabase
+        .from("workflow_variables")
+        .select("is_secret, type, value")
+        .eq("id", variableId)
+        .maybeSingle();
+      if (existingError) throw toDbError(existingError, "automation.updateVariable lookup failed");
+      if (!existing) throw new NotFoundError("WorkflowVariable", variableId);
+
+      const isSecret = input.isSecret ?? (input.type ? input.type === "secret" : existing.is_secret);
+      const patch: Record<string, unknown> = {};
+      if (input.value !== undefined) {
+        patch.value = isSecret && input.value !== null ? encrypt(input.value) : input.value;
+      } else if (isSecret && !existing.is_secret && existing.value !== null) {
+        patch.value = encrypt(existing.value);
+      }
+      if (input.type !== undefined) patch.type = input.type;
+      if (input.isSecret !== undefined) patch.is_secret = input.isSecret;
+
       const { data, error } = await this.supabase
         .from("workflow_variables")
         .update(patch as never)
@@ -1188,9 +1208,11 @@ export class AutomationService {
  * Construct an {@link AutomationService} with a fresh admin client +
  * executor. Used by the API routes.
  */
-export function createAutomationService(): AutomationService {
-  const supabase = createSupabaseAdminClient();
-  return new AutomationService(supabase);
+export async function createAutomationService(): Promise<AutomationService> {
+  // API requests must retain the caller's JWT so RLS enforces workspace
+  // membership. Background dispatchers construct their own explicit admin
+  // clients and are not routed through this factory.
+  return new AutomationService(await createSupabaseServerClient());
 }
 
 // ---------------------------------------------------------------------------

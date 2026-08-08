@@ -32,7 +32,7 @@ export async function GET(
       offset: url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : undefined,
     });
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const templates = await service.listTemplates(query);
     return apiSuccess({ templates });
   } catch (err) {
@@ -48,7 +48,7 @@ export async function POST(
     const body = await parseJsonBody(req);
     const input = validateInput(createTemplateSchema, body);
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const template = await service.createTemplate(user.id, input);
     return apiSuccess({ template });
   } catch (err) {

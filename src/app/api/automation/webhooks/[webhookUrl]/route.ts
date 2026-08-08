@@ -66,6 +66,7 @@ export async function POST(
       const { runId } = await dispatcher.dispatchWebhook({
         urlSlug: webhookUrl,
         body: parsedBody,
+        rawBody,
         headers,
       });
       return NextResponse.json(
@@ -89,9 +90,8 @@ export async function POST(
       throw err;
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { success: false, error: { code: "INTERNAL_ERROR", message } },
+      { success: false, error: { code: "INTERNAL_ERROR", message: "An internal error occurred. Please try again." } },
       { status: 500 },
     );
   }

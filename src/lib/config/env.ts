@@ -110,7 +110,7 @@ const envSchema = z.object({
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, "ENCRYPTION_KEY must be 32 bytes hex (64 chars)"),
   RATE_LIMIT_SECRET: z.string().min(8),
-  CRON_SECRET: z.string().min(8).default("dev-cron-secret"),
+  CRON_SECRET: z.string().min(16),
 
   // Feature flags -----------------------------------------------------------
   FEATURE_CHAT_ENABLED: z
@@ -186,6 +186,10 @@ function loadBuildEnv(): EnvSchema {
       process.env.RATE_LIMIT_SECRET && process.env.RATE_LIMIT_SECRET.length >= 8
         ? process.env.RATE_LIMIT_SECRET
         : "supa-ai-build-rate-limit",
+    CRON_SECRET:
+      process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 16
+        ? process.env.CRON_SECRET
+        : "supa-ai-build-cron-secret",
   };
 
   const parsed = envSchema.safeParse(buildEnv);

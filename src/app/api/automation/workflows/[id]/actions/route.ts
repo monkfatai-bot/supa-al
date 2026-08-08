@@ -29,7 +29,7 @@ export async function GET(
     const { id } = await ctx.params;
     if (!id) throw new NotFoundError("Workflow");
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const actions = await service.listActions(id);
     return apiSuccess({ actions });
   } catch (err) {
@@ -49,7 +49,7 @@ export async function POST(
     const body = await parseJsonBody(req);
     const input = validateInput(createActionSchema, body);
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const action = await service.createAction(id, input);
     return apiSuccess({ action });
   } catch (err) {

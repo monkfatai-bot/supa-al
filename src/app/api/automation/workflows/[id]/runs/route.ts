@@ -32,7 +32,7 @@ export async function GET(
       ? Number(url.searchParams.get("limit"))
       : 30;
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const runs = await service.listRunsForWorkflow(id, limit);
     return apiSuccess({ runs });
   } catch (err) {
@@ -52,7 +52,7 @@ export async function POST(
     const body = await parseJsonBody(req);
     const payload = (body.payload as Record<string, unknown> | undefined) ?? {};
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const run = await service.startRun(id, payload);
     return apiSuccess({ run });
   } catch (err) {

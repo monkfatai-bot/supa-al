@@ -35,7 +35,7 @@ export async function GET(
       offset: url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : undefined,
     });
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const workflows = await service.listWorkflows(workspaceId, query);
     return apiSuccess({ workflows });
   } catch (err) {
@@ -52,7 +52,7 @@ export async function POST(
     const body = await parseJsonBody(req);
     const input = validateInput(createWorkflowSchema, body);
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const workflow = await service.createWorkflow(workspaceId, user.id, input);
     return apiSuccess({ workflow });
   } catch (err) {

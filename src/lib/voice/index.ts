@@ -16,6 +16,7 @@ export {
   PaymentError,
   AIProviderError,
 } from "./voice-service";
+export { assertVoiceWorkspaceMembership } from "./authorization";
 export {
   createVoiceAudioStorage,
   VoiceAudioStorage,

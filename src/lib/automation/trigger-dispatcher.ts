@@ -123,7 +123,7 @@ export class WebhookDispatcher {
    *     signature verification fails.
    */
   async dispatchWebhook(input: DispatchWebhookInput): Promise<{ runId: string }> {
-    const { urlSlug, body, headers = {} } = input;
+    const { urlSlug, body, rawBody, headers = {} } = input;
     if (!urlSlug) throw new NotFoundError("WebhookEndpoint");
 
     let endpoint: WebhookEndpoint | null;
@@ -140,7 +140,7 @@ export class WebhookDispatcher {
       if (!endpoint) throw new NotFoundError("WebhookEndpoint", urlSlug);
 
       // Verify the signature (when a secret is set).
-      const bodyString = typeof body === "string" ? body : JSON.stringify(body ?? {});
+      const bodyString = rawBody ?? (typeof body === "string" ? body : JSON.stringify(body ?? {}));
       if (!verifySignature(bodyString, endpoint.secret, headers)) {
         throw new Error("Invalid signature");
       }

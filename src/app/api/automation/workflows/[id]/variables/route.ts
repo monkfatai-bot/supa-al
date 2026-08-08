@@ -20,6 +20,13 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
+function toPublicVariable(variable: { id: string; key: string; value: string | null; type: string; is_secret: boolean }) {
+  if (variable.is_secret) {
+    return { id: variable.id, key: variable.key, type: variable.type, isSecret: true, hasValue: variable.value !== null };
+  }
+  return { id: variable.id, key: variable.key, type: variable.type, isSecret: false, hasValue: variable.value !== null, value: variable.value };
+}
+
 export async function GET(
   _req: NextRequest,
   ctx: RouteContext,
@@ -29,9 +36,9 @@ export async function GET(
     const { id } = await ctx.params;
     if (!id) throw new NotFoundError("Workflow");
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const variables = await service.listVariables(id);
-    return apiSuccess({ variables });
+    return apiSuccess({ variables: variables.map(toPublicVariable) });
   } catch (err) {
     return apiError(err);
   }
@@ -49,9 +56,9 @@ export async function POST(
     const body = await parseJsonBody(req);
     const input = validateInput(createVariableSchema, body);
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const variable = await service.createVariable(id, input);
-    return apiSuccess({ variable });
+    return apiSuccess({ variable: toPublicVariable(variable) });
   } catch (err) {
     return apiError(err);
   }

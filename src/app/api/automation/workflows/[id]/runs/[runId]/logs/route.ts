@@ -31,7 +31,7 @@ export async function GET(
       ? Number(url.searchParams.get("limit"))
       : 100;
 
-    const service = createAutomationService();
+    const service = await createAutomationService();
     const logs = await service.listLogs(runId, limit);
     return apiSuccess({ logs });
   } catch (err) {
