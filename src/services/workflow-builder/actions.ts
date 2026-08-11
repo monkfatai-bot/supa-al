@@ -425,7 +425,7 @@ export async function getWorkflowComments(
   const profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
 
   const enrich = (c: WorkflowComment): WorkflowCommentWithAuthor => {
-    const p = profileMap.get(c.user_id);
+    const p = profileMap.get(c.user_id) as any;
     const children = comments.filter((r: any) => r.parent_id === c.id);
     return {
       ...c,
