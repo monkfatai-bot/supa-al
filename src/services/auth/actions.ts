@@ -29,6 +29,11 @@ export async function signup(
 
   const supabase = await createServerSupabaseClient();
 
+  // Get the origin from headers if available, fallback to env variable
+  const origin = env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}`
+    : env.NEXT_PUBLIC_APP_URL;
+
   const { data, error } = await supabase.auth.signUp({
     email: input.email,
     password: input.password,
@@ -36,7 +41,7 @@ export async function signup(
       data: {
         full_name: input.fullName,
       },
-      emailRedirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      emailRedirectTo: `${origin}/auth/callback`,
     },
   });
 
@@ -331,10 +336,15 @@ export async function updateProfile(data: {
 export async function loginWithProvider(provider: string): Promise<AuthActionResponse> {
   const supabase = await createServerSupabaseClient();
 
+  // Get the origin from environment
+  const origin = env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000");
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: provider as any,
     options: {
-      redirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      redirectTo: `${origin}/auth/callback`,
     },
   });
 
@@ -359,11 +369,16 @@ export async function resendVerification(
 ): Promise<AuthActionResponse> {
   const supabase = await createServerSupabaseClient();
 
+  // Get the origin from environment
+  const origin = env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000");
+
   const { error } = await supabase.auth.resend({
     type: "signup",
     email,
     options: {
-      emailRedirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      emailRedirectTo: `${origin}/auth/callback`,
     },
   });
 
