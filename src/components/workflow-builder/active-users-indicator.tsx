@@ -58,7 +58,7 @@ export function ActiveUsersIndicator({ workflowId }: ActiveUsersIndicatorProps) 
     const supabase = createClient();
 
     // Get current user ID
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(({ data }: any) => {
       setMyId(data.user?.id ?? null);
     });
 
@@ -95,7 +95,7 @@ export function ActiveUsersIndicator({ workflowId }: ActiveUsersIndicatorProps) 
 
         setUsers(others);
       })
-      .subscribe(async (status) => {
+      .subscribe(async (status: string) => {
         if (status === 'SUBSCRIBED') {
           const { data: { user } } = await supabase.auth.getUser();
           await channel.track({

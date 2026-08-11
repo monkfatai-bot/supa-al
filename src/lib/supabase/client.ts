@@ -8,8 +8,9 @@ const STUB_CLIENT = {
     onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
   },
   channel: () => ({
-    on: () => ({ subscribe: () => ({ unsubscribe: () => {} }), subscribe: () => ({ unsubscribe: () => {} }) }),
-    subscribe: () => ({ unsubscribe: () => {} }),
+    on: () => ({
+      subscribe: () => ({ unsubscribe: () => {} }),
+    }),
   }),
 } as any;
 

@@ -222,7 +222,7 @@ export function CommentThread({ workflowId, nodeId }: CommentThreadProps) {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(({ data }: any) => {
       setCurrentUserId(data.user?.id);
     });
   }, []);

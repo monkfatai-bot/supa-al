@@ -51,7 +51,7 @@ export function CollaborationCursorOverlay({ workflowId }: CollaborationCursorOv
 
     const supabase = createClient();
 
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(({ data }: any) => {
       setMyId(data.user?.id ?? null);
     });
 
@@ -88,7 +88,7 @@ export function CollaborationCursorOverlay({ workflowId }: CollaborationCursorOv
 
         setCursors(remoteCursors);
       })
-      .subscribe(async (status) => {
+      .subscribe(async (status: string) => {
         if (status === 'SUBSCRIBED') {
           const { data: { user } } = await supabase.auth.getUser();
           await channel.track({

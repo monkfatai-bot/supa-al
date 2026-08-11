@@ -62,7 +62,7 @@ export function useWorkflowCollaboration(workflowId: string) {
         });
         setActiveUsers(users);
       })
-      .subscribe(async (status) => {
+      .subscribe(async (status: string) => {
         if (status === 'SUBSCRIBED') {
           const {
             data: { user },
