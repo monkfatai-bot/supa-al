@@ -56,10 +56,6 @@ export function ActiveUsersIndicator({ workflowId }: ActiveUsersIndicatorProps) 
     if (!workflowId) return;
 
     const supabase = createClient();
-    if (!supabase) {
-      // Supabase not configured, collaboration unavailable
-      return;
-    }
 
     // Get current user ID
     supabase.auth.getUser().then(({ data }) => {

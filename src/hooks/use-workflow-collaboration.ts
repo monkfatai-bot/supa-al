@@ -41,10 +41,6 @@ export function useWorkflowCollaboration(workflowId: string) {
     if (!workflowId) return;
 
     const supabase = createClient();
-    if (!supabase) {
-      // Supabase not configured, collaboration unavailable
-      return;
-    }
     const channel = supabase
       .channel(`workflow:${workflowId}:collab`)
       .on('presence', { event: 'sync' }, () => {

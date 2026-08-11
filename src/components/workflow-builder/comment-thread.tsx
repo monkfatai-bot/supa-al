@@ -222,10 +222,6 @@ export function CommentThread({ workflowId, nodeId }: CommentThreadProps) {
 
   useEffect(() => {
     const supabase = createClient();
-    if (!supabase) {
-      // Supabase not configured
-      return;
-    }
     supabase.auth.getUser().then(({ data }) => {
       setCurrentUserId(data.user?.id);
     });
@@ -250,10 +246,6 @@ export function CommentThread({ workflowId, nodeId }: CommentThreadProps) {
 
   useEffect(() => {
     const supabase = createClient();
-    if (!supabase) {
-      // Supabase not configured, realtime updates unavailable
-      return;
-    }
     const channel = supabase
       .channel(`workflow:${workflowId}:comments`)
       .on(

@@ -50,10 +50,6 @@ export function CollaborationCursorOverlay({ workflowId }: CollaborationCursorOv
     if (!workflowId) return;
 
     const supabase = createClient();
-    if (!supabase) {
-      // Supabase not configured, collaboration unavailable
-      return;
-    }
 
     supabase.auth.getUser().then(({ data }) => {
       setMyId(data.user?.id ?? null);

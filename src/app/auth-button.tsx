@@ -15,11 +15,6 @@ export function AuthButton() {
   useEffect(() => {
     const supabase = createClient();
 
-    // Skip authentication if Supabase is not configured
-    if (!supabase) {
-      return;
-    }
-
     async function getUser() {
       const {
         data: { user },
