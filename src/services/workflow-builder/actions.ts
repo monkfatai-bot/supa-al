@@ -417,24 +417,24 @@ export async function getWorkflowComments(
     .order('created_at', { ascending: true });
   if (error || !comments) return [];
 
-  const authorIds = [...new Set(comments.map((c) => c.user_id))];
+  const authorIds = [...new Set(comments.map((c: any) => c.user_id))];
   const { data: profiles } =
     authorIds.length > 0
       ? await supabase.from('profiles').select('id, full_name, avatar_url').in('id', authorIds)
       : { data: [] };
-  const profileMap = new Map((profiles ?? []).map((p) => [p.id, p]));
+  const profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
 
   const enrich = (c: WorkflowComment): WorkflowCommentWithAuthor => {
     const p = profileMap.get(c.user_id);
-    const children = comments.filter((r) => r.parent_id === c.id);
+    const children = comments.filter((r: any) => r.parent_id === c.id);
     return {
       ...c,
-      author: p ? { full_name: p.full_name, avatar_url: p.avatar_url } : undefined,
+      author: p ? { full_name: p?.full_name ?? '', avatar_url: p?.avatar_url ?? '' } : undefined,
       replies: children.length > 0 ? children.map(enrich) : undefined,
     };
   };
 
-  return comments.filter((c) => c.parent_id === null).map(enrich);
+  return comments.filter((c: any) => c.parent_id === null).map(enrich);
 }
 
 // ── Collaboration ───────────────────────────────────────────────────────────
@@ -532,7 +532,7 @@ export async function getActiveCollaborators(
     .eq('is_active', true);
   if (error || !collabs) return [];
 
-  return collabs.map((c) => ({
+  return collabs.map((c: any) => ({
     ...c,
     full_name: (c.profiles as { full_name: string | null } | null)?.full_name ?? null,
     avatar_url: (c.profiles as { avatar_url: string | null } | null)?.avatar_url ?? null,
@@ -582,11 +582,11 @@ export async function saveWorkflowCanvas(
     supabase.from('workflow_nodes').select('id').eq('workflow_id', workflowId),
     supabase.from('workflow_edges').select('id').eq('workflow_id', workflowId),
   ]);
-  const existingNodeIds = new Set((existingNodes.data ?? []).map((n) => n.id));
-  const existingEdgeIds = new Set((existingEdges.data ?? []).map((e) => e.id));
+  const existingNodeIds = new Set((existingNodes.data ?? []).map((n: any) => n.id));
+  const existingEdgeIds = new Set((existingEdges.data ?? []).map((e: any) => e.id));
 
-  const removedNodeIds = [...existingNodeIds].filter((id) => !incomingNodeIds.has(id));
-  const removedEdgeIds = [...existingEdgeIds].filter((id) => !incomingEdgeIds.has(id));
+  const removedNodeIds = [...existingNodeIds].filter((id: string) => !incomingNodeIds.has(id as string));
+  const removedEdgeIds = [...existingEdgeIds].filter((id: string) => !incomingEdgeIds.has(id as string));
 
   // Build layout JSONB param
   const layoutParam = {
@@ -717,21 +717,21 @@ export async function getWorkflowVersions(workflowId: string): Promise<WorkflowV
     .order('version_number', { ascending: false });
   if (error || !data) return [];
 
-  const authorIds = [...new Set(data.map((v) => v.created_by))];
+  const authorIds = [...new Set(data.map((v: any) => v.created_by))];
   const { data: profiles } =
     authorIds.length > 0
       ? await supabase.from('profiles').select('id, full_name, avatar_url').in('id', authorIds)
       : { data: [] };
-  const profileMap = new Map((profiles ?? []).map((p) => [p.id, p]));
+  const profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
 
-  return data.map((v) => {
+  return data.map((v: any) => {
     const def = v.definition as Record<string, unknown> | null;
     const nodes = Array.isArray(def?.nodes) ? (def.nodes as unknown[]) : [];
     const edges = Array.isArray(def?.edges) ? (def.edges as unknown[]) : [];
     const author = profileMap.get(v.created_by);
     return {
       ...v,
-      author: author ? { full_name: author.full_name, avatar_url: author.avatar_url } : undefined,
+      author: author ? { full_name: author?.full_name ?? '', avatar_url: author?.avatar_url ?? '' } : undefined,
       node_count: nodes.length,
       edge_count: edges.length,
     };
@@ -775,8 +775,8 @@ export async function restoreWorkflowVersion(
     supabase.from('workflow_nodes').select('id').eq('workflow_id', workflowId),
     supabase.from('workflow_edges').select('id').eq('workflow_id', workflowId),
   ]);
-  const removedNodeIds = (existingNodes.data ?? []).map((n) => n.id);
-  const removedEdgeIds = (existingEdges.data ?? []).map((e) => e.id);
+  const removedNodeIds = (existingNodes.data ?? []).map((n: any) => n.id);
+  const removedEdgeIds = (existingEdges.data ?? []).map((e: any) => e.id);
 
   // Restore via atomic RPC
   const layoutParam = { viewport_x: 0, viewport_y: 0, zoom: 1, collapsed_panels: [] as Json };

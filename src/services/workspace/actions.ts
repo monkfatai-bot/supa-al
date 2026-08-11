@@ -36,7 +36,7 @@ export async function getWorkspaces(): Promise<WorkspaceWithMemberCount[]> {
     return [];
   }
 
-  const workspaceIds = memberships.map((m) => m.workspace_id);
+  const workspaceIds = memberships.map((m: any) => m.workspace_id);
 
   const { data: workspaces, error: wsError } = await supabase
     .from("workspaces")
@@ -97,7 +97,7 @@ export async function getWorkspace(
     .select("*, profiles(full_name, avatar_url)")
     .eq("workspace_id", workspaceId);
 
-  const memberList: MemberWithProfile[] = (members ?? []).map((m) => ({
+  const memberList: MemberWithProfile[] = (members ?? []).map((m: any) => ({
     ...m,
     full_name: (m.profiles as { full_name: string | null } | null)?.full_name ?? null,
     avatar_url: (m.profiles as { avatar_url: string | null } | null)?.avatar_url ?? null,
@@ -313,7 +313,7 @@ export async function getWorkspaceMembers(
     .select("*, profiles(full_name, avatar_url)")
     .eq("workspace_id", workspaceId);
 
-  return (members ?? []).map((m) => ({
+  return (members ?? []).map((m: any) => ({
     ...m,
     full_name: (m.profiles as { full_name: string | null } | null)?.full_name ?? null,
     avatar_url: (m.profiles as { avatar_url: string | null } | null)?.avatar_url ?? null,
