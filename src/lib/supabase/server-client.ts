@@ -6,10 +6,10 @@ import { env } from "@/config/env";
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies();
 
-  // If Supabase credentials are not configured, return null
   if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    console.warn("Supabase credentials not configured - server client unavailable");
-    return null;
+    throw new Error(
+      "Supabase credentials not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to your environment variables."
+    );
   }
 
   return createServerClient(
@@ -43,10 +43,10 @@ export async function createServerSupabaseClient() {
  * is verified beforehand via requireAuth().
  */
 export function createServiceClient() {
-  // If Supabase credentials are not configured, return null
   if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.warn("Supabase service role key not configured - service client unavailable");
-    return null;
+    throw new Error(
+      "Supabase service role key not configured. Add SUPABASE_SERVICE_ROLE_KEY to your server environment variables."
+    );
   }
 
   return createClient(
