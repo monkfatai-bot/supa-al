@@ -971,14 +971,14 @@ export async function getSyncStats(
     let avgDurationMs: number | null = null;
     if (completedJobs && completedJobs.length > 0) {
       const durations = completedJobs
-        .filter((j) => j.started_at && j.completed_at)
+        .filter((j: any) => j.started_at && j.completed_at)
         .map(
-          (j) =>
+          (j: any) =>
             new Date(j.completed_at as string).getTime() -
             new Date(j.started_at as string).getTime()
         );
       if (durations.length > 0) {
-        avgDurationMs = Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
+        avgDurationMs = Math.round(durations.reduce((a: any, b: any) => a + b, 0) / durations.length);
       }
     }
 

@@ -664,7 +664,7 @@ export async function getVoiceHistory(
 
   const { data, count } = await query;
 
-  const items: VoiceHistoryItem[] = (data ?? []).map((gen) => {
+  const items: VoiceHistoryItem[] = (data ?? []).map((gen: any) => {
     const jobs = (gen as Record<string, unknown>).voice_jobs as VoiceJob[] | null;
     return {
       generation: gen as unknown as VoiceGeneration,

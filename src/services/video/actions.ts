@@ -307,7 +307,7 @@ export async function getVideoHistory(
 
   const { data, count } = await query;
 
-  const items: VideoHistoryItem[] = (data ?? []).map((gen) => {
+  const items: VideoHistoryItem[] = (data ?? []).map((gen: any) => {
     const jobs = (gen as Record<string, unknown>).video_jobs as VideoJob[] | null;
     return {
       generation: gen as unknown as VideoGeneration,
