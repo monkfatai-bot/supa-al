@@ -1,6 +1,52 @@
 import { createClient } from "@supabase/supabase-js";
 import { env } from "@/config/env";
 
+// Comprehensive stub query builder
+const createStubQueryBuilder = () => ({
+  select: () => ({
+    eq: () => ({ data: null, error: null }),
+    in: () => ({ data: null, error: null }),
+    neq: () => ({ data: null, error: null }),
+    gt: () => ({ data: null, error: null }),
+    gte: () => ({ data: null, error: null }),
+    lt: () => ({ data: null, error: null }),
+    lte: () => ({ data: null, error: null }),
+    like: () => ({ data: null, error: null }),
+    ilike: () => ({ data: null, error: null }),
+    is: () => ({ data: null, error: null }),
+    contains: () => ({ data: null, error: null }),
+    range: () => ({ data: null, error: null }),
+    order: () => ({
+      data: null,
+      error: null,
+      eq: () => ({ data: null, error: null }),
+      in: () => ({ data: null, error: null }),
+    }),
+    limit: () => ({ data: null, error: null }),
+    data: null,
+    error: null,
+  }),
+  insert: () => ({
+    select: () => ({ data: null, error: null }),
+    data: null,
+    error: null,
+  }),
+  update: () => ({
+    eq: () => ({ data: null, error: null }),
+    select: () => ({ data: null, error: null }),
+    data: null,
+    error: null,
+  }),
+  delete: () => ({
+    eq: () => ({ data: null, error: null }),
+    select: () => ({ data: null, error: null }),
+    data: null,
+    error: null,
+  }),
+  data: null,
+  error: null,
+});
+
 // Stub admin client for when Supabase is not configured
 const STUB_ADMIN_CLIENT = {
   auth: {
@@ -9,12 +55,7 @@ const STUB_ADMIN_CLIENT = {
       deleteUser: async () => ({ data: null, error: null }),
     },
   },
-  from: () => ({
-    select: () => ({ eq: () => ({ in: () => ({ data: [], error: null }) }), data: [], error: null }),
-    insert: () => ({ data: null, error: null }),
-    update: () => ({ eq: () => ({ data: null, error: null }), data: null, error: null }),
-    delete: () => ({ eq: () => ({ data: null, error: null }), data: null, error: null }),
-  }),
+  from: () => createStubQueryBuilder(),
   rpc: async () => ({ data: null, error: null }),
 } as any;
 

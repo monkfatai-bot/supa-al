@@ -3,19 +3,66 @@ import { createServerClient as createServerClientSSR, type CookieOptions } from 
 import { cookies } from "next/headers";
 import { env } from "@/config/env";
 
+// Comprehensive stub query builder that handles all chaining patterns
+const createStubQueryBuilder = () => ({
+  select: () => ({
+    eq: () => ({ data: null, error: null }),
+    in: () => ({ data: null, error: null }),
+    neq: () => ({ data: null, error: null }),
+    gt: () => ({ data: null, error: null }),
+    gte: () => ({ data: null, error: null }),
+    lt: () => ({ data: null, error: null }),
+    lte: () => ({ data: null, error: null }),
+    like: () => ({ data: null, error: null }),
+    ilike: () => ({ data: null, error: null }),
+    is: () => ({ data: null, error: null }),
+    contains: () => ({ data: null, error: null }),
+    range: () => ({ data: null, error: null }),
+    order: () => ({
+      data: null,
+      error: null,
+      eq: () => ({ data: null, error: null }),
+      in: () => ({ data: null, error: null }),
+    }),
+    limit: () => ({ data: null, error: null }),
+    data: null,
+    error: null,
+  }),
+  insert: () => ({
+    select: () => ({ data: null, error: null }),
+    data: null,
+    error: null,
+  }),
+  update: () => ({
+    eq: () => ({ data: null, error: null }),
+    select: () => ({ data: null, error: null }),
+    data: null,
+    error: null,
+  }),
+  delete: () => ({
+    eq: () => ({ data: null, error: null }),
+    select: () => ({ data: null, error: null }),
+    data: null,
+    error: null,
+  }),
+  data: null,
+  error: null,
+});
+
 // Stub server client for when Supabase is not configured
 const STUB_SERVER_CLIENT = {
   auth: {
     getUser: async () => ({ data: { user: null }, error: null }),
     exchangeCodeForSession: async () => ({ data: { user: null, session: null }, error: null }),
+    signInWithOAuth: async () => ({ data: { url: "" }, error: null }),
+    signOut: async () => ({ error: null }),
   },
-  from: () => ({
-    select: () => ({ eq: () => ({ in: () => ({ data: [], error: null }) }), data: [], error: null }),
-    insert: () => ({ data: null, error: null }),
-    update: () => ({ eq: () => ({ data: null, error: null }), data: null, error: null }),
-    delete: () => ({ eq: () => ({ data: null, error: null }), data: null, error: null }),
-  }),
+  from: () => createStubQueryBuilder(),
   rpc: async () => ({ data: null, error: null }),
+  channel: () => ({
+    on: () => ({ subscribe: () => ({ unsubscribe: () => {} }) }),
+    subscribe: () => ({ unsubscribe: () => {} }),
+  }),
 } as any;
 
 export async function createServerSupabaseClient() {
