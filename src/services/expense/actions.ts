@@ -708,7 +708,7 @@ export async function getExpenseCategories(
   }
 
   // Deduplicate and sort
-  const categories = Array.from(new Set(data.map((r) => r.category))).sort();
+  const categories = Array.from(new Set(data.map((r) => r.category))) as string[];
 
   return { success: true, message: "Categories retrieved.", categories };
 }

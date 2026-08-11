@@ -322,7 +322,7 @@ export async function loginWithProvider(provider: string): Promise<AuthActionRes
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: provider as Parameters<typeof supabase.auth.signInWithOAuth>[0]["provider"],
+    provider: provider as any,
     options: {
       redirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/callback`,
     },
