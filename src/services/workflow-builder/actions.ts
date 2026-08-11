@@ -585,8 +585,8 @@ export async function saveWorkflowCanvas(
   const existingNodeIds = new Set((existingNodes.data ?? []).map((n: any) => n.id));
   const existingEdgeIds = new Set((existingEdges.data ?? []).map((e: any) => e.id));
 
-  const removedNodeIds = [...existingNodeIds].filter((id: string) => !incomingNodeIds.has(id as string));
-  const removedEdgeIds = [...existingEdgeIds].filter((id: string) => !incomingEdgeIds.has(id as string));
+  const removedNodeIds = Array.from(existingNodeIds).filter((id: any) => !incomingNodeIds.has(id));
+  const removedEdgeIds = Array.from(existingEdgeIds).filter((id: any) => !incomingEdgeIds.has(id));
 
   // Build layout JSONB param
   const layoutParam = {
@@ -728,7 +728,7 @@ export async function getWorkflowVersions(workflowId: string): Promise<WorkflowV
     const def = v.definition as Record<string, unknown> | null;
     const nodes = Array.isArray(def?.nodes) ? (def.nodes as unknown[]) : [];
     const edges = Array.isArray(def?.edges) ? (def.edges as unknown[]) : [];
-    const author = profileMap.get(v.created_by);
+    const author = profileMap.get(v.created_by) as any;
     return {
       ...v,
       author: author ? { full_name: author?.full_name ?? '', avatar_url: author?.avatar_url ?? '' } : undefined,
