@@ -5,16 +5,22 @@ import { ensureProfile } from "@/services/auth/session";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  // Default to dashboard after login, allow override with 'next' param
+  const next = searchParams.get("next") ?? "/chat";
 
   if (code) {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    try {
+      const supabase = await createServerSupabaseClient();
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
-    if (!error && data.user) {
-      // Ensure profile exists (handles social login signups)
-      await ensureProfile(data.user.id);
-      return NextResponse.redirect(`${origin}${next}`);
+      if (!error && data.user) {
+        // Ensure profile exists (handles social login signups)
+        await ensureProfile(data.user.id);
+        // Redirect to dashboard or requested page
+        return NextResponse.redirect(`${origin}${next}`);
+      }
+    } catch (error) {
+      console.error("Auth callback error:", error);
     }
   }
 
