@@ -14,10 +14,13 @@ import { SocialLogin } from "@/components/auth/social-login";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ROUTES } from "@/config/constants";
+import { useRouter } from "next/navigation";
 
 export function LoginCard() {
   const [formError, setFormError] = React.useState("");
   const [pending, startTransition] = React.useTransition();
+
+  const router = useRouter();
 
   const {
     register,
@@ -34,6 +37,9 @@ export function LoginCard() {
       const result = await login(values);
       if (!result.success) {
         setFormError(result.message);
+      } else {
+        // Navigate client-side after successful login
+        router.push(ROUTES.DASHBOARD);
       }
     });
   }
