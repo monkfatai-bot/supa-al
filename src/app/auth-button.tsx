@@ -7,10 +7,13 @@ import { logout } from "@/services/auth/actions";
 import { ROUTES } from "@/config/constants";
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 export function AuthButton() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const router = useRouter();
 
   useEffect(() => {
     const supabase = createClient();
@@ -35,7 +38,10 @@ export function AuthButton() {
 
   function handleLogout() {
     startTransition(async () => {
-      await logout();
+      const result = await logout();
+      if (result.success) {
+        router.push(ROUTES.LOGIN);
+      }
     });
   }
 
