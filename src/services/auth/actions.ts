@@ -104,7 +104,7 @@ export async function login(
   logger.info("User logged in", { userId: data.user.id });
   void logActivity("login_success", "User logged in");
   revalidatePath("/", "layout");
-  redirect(ROUTES.CHAT);
+  redirect(ROUTES.DASHBOARD);
 }
 
 /**
@@ -344,7 +344,7 @@ export async function loginWithProvider(provider: string): Promise<AuthActionRes
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: provider as any,
     options: {
-      redirectTo: `${origin}/auth/callback`,
+      redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(ROUTES.DASHBOARD)}`,
     },
   });
 
