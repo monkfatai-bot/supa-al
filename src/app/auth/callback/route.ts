@@ -2,19 +2,40 @@ import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server-client";
 import { ensureProfile } from "@/services/auth/session";
 import { env } from "@/config/env";
+import { ROUTES } from "@/config/constants";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
   const errorDescription = searchParams.get("error_description");
-  const next = searchParams.get("next") ?? "/chat";
+
+  // Accept several common param names used by different flows/SDKs
+  const nextParamRaw =
+    searchParams.get("next") ??
+    searchParams.get("redirectTo") ??
+    searchParams.get("redirect_to") ??
+    searchParams.get("redirect") ??
+    ROUTES.DASHBOARD; // fallback to dashboard
+
+  // Normalize to a path. If a full URL was provided, extract pathname.
+  let next: string;
+  try {
+    if (/^https?:\/\//i.test(nextParamRaw)) {
+      next = new URL(nextParamRaw).pathname;
+    } else {
+      next = nextParamRaw.startsWith("/") ? nextParamRaw : `/${nextParamRaw}`;
+    }
+  } catch {
+    next = ROUTES.DASHBOARD;
+  }
 
   console.log("Auth callback called:", {
     code: code ? "present" : "missing",
     error,
     errorDescription,
     origin,
+    next,
   });
 
   // If Supabase returned an error, show it
@@ -39,7 +60,7 @@ export async function GET(request: Request) {
 
   try {
     const supabase = await createServerSupabaseClient();
-    
+
     console.log("Exchanging code for session...");
     const { data, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
 
@@ -67,7 +88,7 @@ export async function GET(request: Request) {
       status: 303, // Use 303 to ensure POST is not followed by GET
     });
 
-    console.log("Redirecting to dashboard at", next);
+    console.log("Redirecting to", next);
     return response;
   } catch (error) {
     console.error("Auth callback exception:", error);
