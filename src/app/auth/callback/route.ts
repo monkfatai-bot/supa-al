@@ -32,37 +32,46 @@ export async function GET(request: Request) {
     );
   }
 
-  if (code) {
-    try {
-      const supabase = await createServerSupabaseClient();
-      const { data, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
-
-      if (sessionError) {
-        console.error("Session exchange error:", sessionError);
-        return NextResponse.redirect(`${origin}/auth/login?error=session_failed&message=${encodeURIComponent(sessionError.message)}`);
-      }
-
-      if (!data.user) {
-        console.error("No user returned from session exchange");
-        return NextResponse.redirect(`${origin}/auth/login?error=no_user`);
-      }
-
-      console.log("Session exchanged successfully", { userId: data.user.id });
-
-      // Ensure profile exists (handles social login signups)
-      await ensureProfile(data.user.id);
-
-      // Redirect to dashboard or requested page
-      console.log("Redirecting to", next);
-      return NextResponse.redirect(`${origin}${next}`);
-    } catch (error) {
-      console.error("Auth callback exception:", error);
-      const errorMsg = error instanceof Error ? error.message : "Unknown error";
-      return NextResponse.redirect(`${origin}/auth/login?error=exception&message=${encodeURIComponent(errorMsg)}`);
-    }
+  if (!code) {
+    console.error("No authorization code provided");
+    return NextResponse.redirect(`${origin}/auth/login?error=no_code&message=No%20authorization%20code`);
   }
 
-  console.error("No code provided to callback");
-  // Redirect to login on error or missing code
-  return NextResponse.redirect(`${origin}/auth/login?error=callback_failed&message=No%20authorization%20code`);
+  try {
+    const supabase = await createServerSupabaseClient();
+    
+    console.log("Exchanging code for session...");
+    const { data, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
+
+    if (sessionError) {
+      console.error("Session exchange error:", sessionError);
+      return NextResponse.redirect(`${origin}/auth/login?error=session_failed&message=${encodeURIComponent(sessionError.message)}`);
+    }
+
+    if (!data.user) {
+      console.error("No user returned from session exchange");
+      return NextResponse.redirect(`${origin}/auth/login?error=no_user&message=No%20user%20returned`);
+    }
+
+    console.log("Session exchanged successfully", { userId: data.user.id, email: data.user.email });
+
+    // Ensure profile exists (but don't let this break the auth flow)
+    try {
+      await ensureProfile(data.user.id);
+    } catch (profileError) {
+      console.warn("Profile creation failed, but continuing with auth:", profileError);
+    }
+
+    // Create response and redirect
+    const response = NextResponse.redirect(`${origin}${next}`, {
+      status: 303, // Use 303 to ensure POST is not followed by GET
+    });
+
+    console.log("Redirecting to dashboard at", next);
+    return response;
+  } catch (error) {
+    console.error("Auth callback exception:", error);
+    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.redirect(`${origin}/auth/login?error=exception&message=${encodeURIComponent(errorMsg)}`);
+  }
 }

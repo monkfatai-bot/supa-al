@@ -104,7 +104,7 @@ export async function login(
   logger.info("User logged in", { userId: data.user.id });
   void logActivity("login_success", "User logged in");
   revalidatePath("/", "layout");
-  redirect(ROUTES.HOME);
+  redirect(ROUTES.CHAT);
 }
 
 /**
