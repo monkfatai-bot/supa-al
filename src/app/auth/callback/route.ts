@@ -16,13 +16,14 @@ export async function GET(request: Request) {
     searchParams.get("redirectTo") ??
     searchParams.get("redirect_to") ??
     searchParams.get("redirect") ??
-    ROUTES.DASHBOARD; // fallback to dashboard
+    ROUTES.DASHBOARD;
 
-  // Normalize to a path. If a full URL was provided, extract pathname.
+  // Normalize to a safe path. If a full URL was provided, only allow same-origin paths.
   let next: string;
   try {
-    if (/^https?:\/\//i.test(nextParamRaw)) {
-      next = new URL(nextParamRaw).pathname;
+    if (nextParamRaw && /^https?:\/\//i.test(nextParamRaw)) {
+      const parsed = new URL(nextParamRaw);
+      next = parsed.origin === origin ? parsed.pathname : ROUTES.DASHBOARD;
     } else {
       next = nextParamRaw.startsWith("/") ? nextParamRaw : `/${nextParamRaw}`;
     }
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
     error,
     errorDescription,
     origin,
-    next,
+    chosenRedirect: next,
   });
 
   // If Supabase returned an error, show it
