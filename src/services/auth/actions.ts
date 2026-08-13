@@ -12,6 +12,17 @@ import type { AuthActionResponse, SignupInput, LoginInput, ChangePasswordInput, 
 import { logActivity } from "@/services/activity-log/actions";
 
 /**
+ * Determine the app origin reliably in server environments.
+ */
+function getOrigin() {
+  // Prefer explicit NEXT_PUBLIC_APP_URL, otherwise use Vercel-provided URL, otherwise localhost
+  return (
+    env.NEXT_PUBLIC_APP_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  );
+}
+
+/**
  * Sign up a new user with email/password and create their profile.
  */
 export async function signup(
@@ -29,10 +40,7 @@ export async function signup(
 
   const supabase = await createServerSupabaseClient();
 
-  // Get the origin from headers if available, fallback to env variable
-  const origin = env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
-    ? `https://${process.env.VERCEL_URL}`
-    : env.NEXT_PUBLIC_APP_URL;
+  const origin = getOrigin();
 
   const { data, error } = await supabase.auth.signUp({
     email: input.email,
@@ -41,7 +49,8 @@ export async function signup(
       data: {
         full_name: input.fullName,
       },
-      emailRedirectTo: `${origin}/auth/callback`,
+      // Ensure callback includes explicit next so users return to dashboard after verifying
+      emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(ROUTES.DASHBOARD)}`,
     },
   });
 
@@ -133,8 +142,10 @@ export async function resetPassword(
 ): Promise<AuthActionResponse> {
   const supabase = await createServerSupabaseClient();
 
+  const origin = getOrigin();
+
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/reset-password`,
+    redirectTo: `${origin}/auth/reset-password`,
   });
 
   if (error) {
@@ -337,9 +348,7 @@ export async function loginWithProvider(provider: string): Promise<AuthActionRes
   const supabase = await createServerSupabaseClient();
 
   // Get the origin from environment
-  const origin = env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL 
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000");
+  const origin = getOrigin();
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: provider as any,
@@ -370,15 +379,13 @@ export async function resendVerification(
   const supabase = await createServerSupabaseClient();
 
   // Get the origin from environment
-  const origin = env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL 
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000");
+  const origin = getOrigin();
 
   const { error } = await supabase.auth.resend({
     type: "signup",
     email,
     options: {
-      emailRedirectTo: `${origin}/auth/callback`,
+      emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(ROUTES.DASHBOARD)}`,
     },
   });
 
