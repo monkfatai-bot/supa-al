@@ -14,16 +14,17 @@ const SECURITY_HEADERS = {
 export async function middleware(request: NextRequest) {
   const response = await updateSession(request);
 
-  // Apply security headers to all responses
-  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+  // Apply security headers
+  Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
     response.headers.set(key, value);
-  }
+  });
 
   return response;
 }
 
 export const config = {
   matcher: [
+    // Match all routes except static files and images
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
