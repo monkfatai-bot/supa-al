@@ -12,17 +12,6 @@ import type { AuthActionResponse, SignupInput, LoginInput, ChangePasswordInput, 
 import { logActivity } from "@/services/activity-log/actions";
 
 /**
- * Determine the app origin reliably in server environments.
- */
-function getOrigin() {
-  // Prefer explicit NEXT_PUBLIC_APP_URL, otherwise use Vercel-provided URL, otherwise localhost
-  return (
-    env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
-  );
-}
-
-/**
  * Sign up a new user with email/password and create their profile.
  */
 export async function signup(
@@ -40,7 +29,10 @@ export async function signup(
 
   const supabase = await createServerSupabaseClient();
 
-  const origin = getOrigin();
+  // Get the origin from headers if available, fallback to env variable
+  const origin = env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}`
+    : env.NEXT_PUBLIC_APP_URL;
 
   const { data, error } = await supabase.auth.signUp({
     email: input.email,
@@ -49,8 +41,7 @@ export async function signup(
       data: {
         full_name: input.fullName,
       },
-      // Ensure callback includes explicit next so users return to dashboard after verifying
-      emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(ROUTES.DASHBOARD)}`,
+      emailRedirectTo: `${origin}/auth/callback`,
     },
   });
 
@@ -76,9 +67,8 @@ export async function signup(
     };
   }
 
-  // If a session was returned (signup also signed the user in), return success and allow the client to navigate
   revalidatePath("/", "layout");
-  return { success: true, message: "Signed up and logged in." };
+  redirect(ROUTES.HOME);
 }
 
 /**
@@ -114,8 +104,7 @@ export async function login(
   logger.info("User logged in", { userId: data.user.id });
   void logActivity("login_success", "User logged in");
   revalidatePath("/", "layout");
-  // Return a success object so client-side callers can handle navigation
-  return { success: true, message: "Logged in" };
+  redirect(ROUTES.CHAT);
 }
 
 /**
@@ -133,8 +122,7 @@ export async function logout(): Promise<AuthActionResponse> {
 
   logger.info("User logged out");
   revalidatePath("/", "layout");
-  // Return success to the client so it can navigate
-  return { success: true, message: "Logged out" };
+  redirect(ROUTES.LOGIN);
 }
 
 /**
@@ -145,10 +133,8 @@ export async function resetPassword(
 ): Promise<AuthActionResponse> {
   const supabase = await createServerSupabaseClient();
 
-  const origin = getOrigin();
-
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${origin}/auth/reset-password`,
+    redirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/reset-password`,
   });
 
   if (error) {
@@ -180,8 +166,7 @@ export async function updatePassword(
 
   logger.info("Password updated");
   revalidatePath("/", "layout");
-  // Return success so the client can navigate after handling the response
-  return { success: true, message: "Password updated successfully." };
+  redirect(ROUTES.LOGIN);
 }
 
 /**
@@ -243,4 +228,165 @@ export async function changeEmail(
     success: true,
     message: "A verification email has been sent to your new address. Please confirm to complete the change.",
   };
+}
+
+/**
+ * Delete the authenticated user's account permanently.
+ */
+export async function deleteAccount(): Promise<AuthActionResponse> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, message: "Not authenticated.", error: "UNAUTHORIZED" };
+  }
+
+  const userId = user.id;
+
+  // Log activity BEFORE deleting (fire and forget)
+  void logActivity("account_deleted", "Account deleted");
+
+  // Use admin client to delete the user — cascades to profiles via on delete cascade
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.deleteUser(userId);
+
+  if (error) {
+    logger.error("Failed to delete account", { reason: error.message, userId });
+    return { success: false, message: "Failed to delete account. Please try again.", error: "DELETE_FAILED" };
+  }
+
+  // Sign out the deleted user's session
+  await supabase.auth.signOut();
+
+  logger.info("Account deleted", { userId });
+  revalidatePath("/", "layout");
+  redirect(ROUTES.LOGIN);
+}
+
+/**
+ * Update the user's profile with extended fields.
+ */
+export async function updateProfile(data: {
+  fullName?: string | null;
+  username?: string | null;
+  bio?: string | null;
+  company?: string | null;
+  jobTitle?: string | null;
+  website?: string | null;
+  phone?: string | null;
+  country?: string | null;
+  timezone?: string;
+  language?: string;
+}): Promise<AuthActionResponse> {
+  const profile = await requireAuth();
+  const supabase = await createServerSupabaseClient();
+
+  // If username is being set, check uniqueness first
+  if (data.username !== undefined && data.username !== null && data.username !== "") {
+    const { data: existing } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("username", data.username)
+      .neq("id", profile.id)
+      .maybeSingle();
+
+    if (existing) {
+      return { success: false, message: "This username is already taken.", error: "USERNAME_TAKEN" };
+    }
+  }
+
+  // Build update object with only defined fields
+  const updates: Record<string, unknown> = {};
+  if (data.fullName !== undefined) updates.full_name = data.fullName ?? null;
+  if (data.username !== undefined) updates.username = data.username === "" ? null : data.username;
+  if (data.bio !== undefined) updates.bio = data.bio === "" ? null : data.bio;
+  if (data.company !== undefined) updates.company = data.company === "" ? null : data.company;
+  if (data.jobTitle !== undefined) updates.job_title = data.jobTitle === "" ? null : data.jobTitle;
+  if (data.website !== undefined) updates.website = data.website === "" ? null : data.website;
+  if (data.phone !== undefined) updates.phone = data.phone === "" ? null : data.phone;
+  if (data.country !== undefined) updates.country = data.country === "" ? null : data.country;
+  if (data.timezone !== undefined) updates.timezone = data.timezone;
+  if (data.language !== undefined) updates.language = data.language;
+
+  if (Object.keys(updates).length === 0) {
+    return { success: true, message: "No changes to save." };
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update(updates)
+    .eq("id", profile.id);
+
+  if (error) {
+    logger.error("Failed to update profile", { reason: error.message, userId: profile.id });
+    return { success: false, message: "Failed to update profile.", error: "UPDATE_FAILED" };
+  }
+
+  void logActivity("profile_update", "Updated profile");
+  logger.info("Profile updated", { userId: profile.id });
+  revalidatePath("/dashboard/settings");
+  return { success: true, message: "Profile updated." };
+}
+
+/**
+ * Initiate social login with an OAuth provider.
+ */
+export async function loginWithProvider(provider: string): Promise<AuthActionResponse> {
+  const supabase = await createServerSupabaseClient();
+
+  // Get the origin from environment
+  const origin = env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000");
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: provider as any,
+    options: {
+      redirectTo: `${origin}/auth/callback`,
+    },
+  });
+
+  if (error) {
+    logger.warn("Social login failed", { provider, reason: error.message });
+    return { success: false, message: `Failed to initiate ${provider} login.`, error: "OAUTH_FAILED" };
+  }
+
+  if (!data.url) {
+    return { success: false, message: "No redirect URL returned.", error: "OAUTH_FAILED" };
+  }
+
+  // Return the URL — the client should redirect to it
+  return { success: true, message: data.url };
+}
+
+/**
+ * Resend the email verification link.
+ */
+export async function resendVerification(
+  email: string
+): Promise<AuthActionResponse> {
+  const supabase = await createServerSupabaseClient();
+
+  // Get the origin from environment
+  const origin = env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL 
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000");
+
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: {
+      emailRedirectTo: `${origin}/auth/callback`,
+    },
+  });
+
+  if (error) {
+    logger.warn("Resend verification failed", { reason: error.message });
+    return { success: false, message: "Unable to resend verification email.", error: "RESEND_FAILED" };
+  }
+
+  logger.info("Verification email resent", { email });
+  return { success: true, message: "Verification email sent! Please check your inbox." };
 }
