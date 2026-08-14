@@ -19,6 +19,10 @@ export async function signup(
 ): Promise<AuthActionResponse> {
   // Check if Supabase is configured
   if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    console.error("Supabase not configured", {
+      url: env.NEXT_PUBLIC_SUPABASE_URL ? "set" : "missing",
+      key: env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "set" : "missing",
+    });
     return {
       success: false,
       message:
@@ -29,10 +33,12 @@ export async function signup(
 
   const supabase = await createServerSupabaseClient();
 
-  // Get the origin from headers if available, fallback to env variable
-  const origin = env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL 
+  // Get the origin from environment
+  const origin = env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL 
     ? `https://${process.env.VERCEL_URL}`
-    : env.NEXT_PUBLIC_APP_URL;
+    : "http://localhost:3000");
+
+  console.log("Attempting signup", { email: input.email, origin });
 
   const { data, error } = await supabase.auth.signUp({
     email: input.email,
@@ -46,6 +52,11 @@ export async function signup(
   });
 
   if (error) {
+    console.error("Signup error:", {
+      message: error.message,
+      status: error.status,
+      code: (error as any).code,
+    });
     logger.warn("Signup failed", { reason: error.message, email: input.email });
 
     if (error.message.includes("already registered")) {
@@ -54,9 +65,10 @@ export async function signup(
     if (error.message.includes("password")) {
       return { success: false, message: "Password does not meet security requirements.", error: "WEAK_PASSWORD" };
     }
-    return { success: false, message: "Signup failed. Please try again.", error: "SIGNUP_FAILED" };
+    return { success: false, message: `Signup failed: ${error.message}`, error: "SIGNUP_FAILED" };
   }
 
+  console.log("Signup successful", { userId: data.user?.id, email: input.email });
   logger.info("User signed up", { userId: data.user?.id, email: input.email });
 
   // If email confirmation is required, user needs to verify first
