@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server-client";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { ensureProfile } from "@/services/auth/session";
 import { env } from "@/config/env";
 
@@ -43,7 +43,31 @@ export async function GET(request: Request) {
   }
 
   try {
-    const supabase = await createServerSupabaseClient();
+    // Create a response we'll modify to add cookies
+    const dashboardUrl = new URL(`${origin}/chat`);
+    let response = NextResponse.redirect(dashboardUrl, { status: 302 });
+
+    // Create Supabase client with cookie handling
+    const supabase = createServerClient(
+      env.NEXT_PUBLIC_SUPABASE_URL,
+      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll().map(cookie => ({
+              name: cookie.name,
+              value: cookie.value,
+            }));
+          },
+          setAll(cookiesToSet: { name: string; value: string; options?: CookieOptions }[]) {
+            console.log("📝 Setting cookies:", cookiesToSet.map(c => c.name).join(", "));
+            cookiesToSet.forEach(({ name, value, options }) => {
+              response.cookies.set(name, value, options as CookieOptions);
+            });
+          },
+        },
+      }
+    );
 
     console.log("🔄 Exchanging authorization code for session...");
     const { data, error: sessionError } = await supabase.auth.exchangeCodeForSession(code);
@@ -76,14 +100,7 @@ export async function GET(request: Request) {
       console.warn("⚠️ Profile creation failed (non-blocking):", profileError);
     }
 
-    // Redirect to chat dashboard with a proper redirect
-    const dashboardUrl = new URL(`${origin}/chat`);
-    console.log("🚀 Redirecting to dashboard:", dashboardUrl.toString());
-    
-    const response = NextResponse.redirect(dashboardUrl, {
-      status: 302,
-    });
-
+    console.log("🚀 Redirecting to dashboard with session cookies");
     return response;
   } catch (error) {
     console.error("❌ Unexpected error in auth callback:", error);
